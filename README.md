@@ -237,8 +237,8 @@ tiny11-automated/
 │   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core
 │   └── nano11builder-headless.ps1        # ✨ Automated Nano
-├── autounattend.xml            # OOBE bypass (Standard/Core)
-├── autounattend-nano.xml       # OOBE bypass (Nano)
+├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
+├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
 ├── CONTRIBUTING.md             # Contributor guidelines
 ├── CODE_OF_CONDUCT.md          # Community standards
 ├── SECURITY.md                 # Security policy
@@ -472,6 +472,82 @@ tiny11-automated/
 
 ---
 
+## 💿 Ventoy Support & Offline Setup
+
+### 🖥️ Booting a Tiny11 ISO from Ventoy
+
+ISOs built by this project are designed to boot straight from Ventoy in its
+**default (non-wimboot) mode** — no Rufus, no extracted USB stick, no `Ctrl+W`.
+
+Earlier builds failed on Ventoy with:
+
+> *"A media driver your computer needs is missing. This could be a DVD, USB, or Hard disk driver."*
+
+**Why it happened.** Ventoy does not extract a Windows ISO. It maps the ISO file as
+a **virtual optical drive** by injecting `ventoy.sys` into the booted Windows PE, and
+Windows Setup then reads `\sources\install.wim` off that virtual drive. The ISOs were
+being built with `oscdimg -u2 -udfver102`, i.e. **UDF 1.02**. UDF 1.02 cannot describe
+a single file larger than 4 GB, and a trimmed `install.wim` / `install.esd` is
+routinely bigger than that. oscdimg still writes the file, but the on-disc metadata
+ends up in a form that lenient readers accept and lean readers mis-parse — so Setup
+could no longer see the installation media. Windows' own UDF driver copes with it,
+which is exactly why the *same* ISO installed fine once Rufus had extracted it.
+
+**What changed.** All three builders now emit **UDF 1.50** (`-u2 -udfver150`), which
+describes large files with proper 64-bit extents and is read correctly by both
+Ventoy and Windows. The ISO container otherwise stays identical to Microsoft's own
+retail media layout (`-u2` = ISO9660 + Joliet + UDF, same El Torito boot entries).
+
+**Before reporting that it still fails, check these three things:**
+
+| Check | Why it matters |
+|-------|----------------|
+| Ventoy **1.1.07 or newer** | Older releases have known virtual-optical-drive bugs |
+| Ventoy data partition is **NTFS**, not exFAT | exFAT is a documented cause of this exact error with Windows ISOs |
+| The ISO is **not** on the 32 MB `VTOYEFI` partition | Ventoy only scans the first, large partition |
+
+If it still fails, please open an issue with the build log (`scripts/*.log`, kept by
+running the workflow with `skip_cleanup: true`). The log now records the size of the
+install image, which is the file that drives all of this.
+
+### 🪟 Local Account — Offline, Out of the Box
+
+Every ISO built here installs **with no internet connection and no Microsoft
+account**. There is nothing to type at `Shift+F10` and no `BYPASSNRO` dance.
+
+| Setting | Value |
+|---------|-------|
+| Account name | `Admin` |
+| Type | Local administrator |
+| Password | *(blank)* |
+| Auto-logon | On for the first boot, then turns itself off |
+| Network during setup | Not required — `DynamicUpdate` is disabled, so Setup never contacts Windows Update |
+
+This works on 24H2, 25H2 and 26H2, where Microsoft has progressively removed the old
+`OOBE\BYPASSNRO` shortcut. The mechanism is a **pre-created local account** declared
+in the answer file (`oobeSystem` → `LocalAccounts`), backed up by `BypassNRO=1` and
+`DisableOnline=1` written into the image registry. The OOBE wizard is skipped
+entirely.
+
+**Changing the account name or password.** Edit `autounattend.xml` (Standard/Core) or
+`autounattend-nano.xml` (Nano). Keep these values in sync:
+
+```xml
+<Name>Admin</Name>
+<DisplayName>Admin</DisplayName>
+...
+<Username>Admin</Username>   <!-- inside <AutoLogon> -->
+```
+
+To set a password, put it in `<Password><Value>` and leave `<PlainText>true</PlainText>`,
+then delete the `<AutoLogon>` block.
+
+> **Note:** the builders rewrite `/IMAGE/INDEX` inside the answer file to match the
+> `-INDEX` you selected, so a Pro or Education build installs that edition unattended
+> instead of silently falling back to Home.
+
+---
+
 ## 🏗️ GitHub Actions Workflows
 
 ### Automated Builds via CI/CD
@@ -624,6 +700,27 @@ preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
 - Network timeout during download
 - Insufficient runner disk space
 - SourceForge API rate limiting
+
+</details>
+
+<details>
+<summary><strong>"A media driver your computer needs is missing" (Ventoy)</strong></summary>
+
+**Problem**: Booting the built ISO from Ventoy stops at the very start of Setup with a
+missing media driver, while the same ISO installs fine when written with Rufus.
+
+**Cause**: Ventoy mounts the ISO as a virtual optical drive, so Setup reads
+`install.wim` through Ventoy's own UDF reader. ISOs built before this change used
+UDF 1.02, which cannot describe files larger than 4 GB. Rufus extracts the ISO
+instead, so it never hits that limit.
+
+**Solutions:**
+1. **Rebuild the ISO** — the builders now use `-udfver150` (UDF 1.50)
+2. Format the Ventoy data partition as **NTFS** (exFAT is a documented cause of this error)
+3. Update Ventoy to **1.1.07 or newer**
+4. Make sure the ISO sits in the first, large Ventoy partition — not the 32 MB `VTOYEFI` one
+
+**Workaround if you are stuck**: install from a PE environment (WinNTSetup, Dism++) instead of booting the ISO directly, and open an issue with the build log attached.
 
 </details>
 
