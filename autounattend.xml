@@ -1,37 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
-    <settings pass="oobeSystem">
-        <component xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-            <OOBE>
-                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
-            </OOBE>
-        </component>
-    </settings>
-    <component xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-        <ConfigureChatAutoInstall>false</ConfigureChatAutoInstall>
-    </component>
-    <settings pass="windowsPE">
-        <component xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-            <DynamicUpdate>
-                <WillShowUI>OnError</WillShowUI>
-            </DynamicUpdate>
-            <ImageInstall>
-                <OSImage>
-                    <Compact>true</Compact>
-                    <WillShowUI>OnError</WillShowUI>
-                    <InstallFrom>
-                        <MetaData wcm:action="add">
-                            <Key>/IMAGE/INDEX</Key>
-                            <Value>1</Value>
-                        </MetaData>
-                    </InstallFrom>
-                </OSImage>
-            </ImageInstall>
-            <UserData>
-                <ProductKey>
-                    <Key/>
-                </ProductKey>
-            </UserData>
-        </component>
-    </settings>
+<!--
+  Tiny11 Automated - unattended answer file (Standard / Core)
+
+  What this file guarantees:
+    * The install is completely OFFLINE. DynamicUpdate is disabled, so Setup never
+      contacts Windows Update, and no Microsoft account screen is ever reachable.
+    * A local administrator account is created automatically, out of the box.
+      Default credentials: user "Admin", blank password, auto-logon on first boot.
+      Change the four <Name>/<DisplayName>/<Username> values below if you want a
+      different account name (keep all four in sync).
+    * The Windows 11 TPM / Secure Boot / CPU / RAM checks are bypassed.
+    * EULA, OEM registration, Wi-Fi and privacy screens are skipped.
+
+  SCHEMA NOTE (this was the bug in the previous version):
+  every <component> MUST live inside a <settings pass="..."> element. A component
+  placed directly under <unattend> makes the whole answer file unparseable, which
+  is why the old OOBE bypass silently did nothing.
+
+  The /IMAGE/INDEX value below is a placeholder. The headless builders rewrite it
+  to match the -INDEX you passed so the correct edition is installed unattended.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+	<settings pass="windowsPE">
+		<component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+			<DynamicUpdate>
+				<!-- Never pull setup updates from the internet - keeps the install offline. -->
+				<Enable>false</Enable>
+				<WillShowUI>Never</WillShowUI>
+			</DynamicUpdate>
+			<ImageInstall>
+				<OSImage>
+					<Compact>true</Compact>
+					<WillShowUI>OnError</WillShowUI>
+					<InstallFrom>
+						<MetaData wcm:action="add">
+							<Key>/IMAGE/INDEX</Key>
+							<Value>1</Value>
+						</MetaData>
+					</InstallFrom>
+				</OSImage>
+			</ImageInstall>
+			<UserData>
+				<AcceptEula>true</AcceptEula>
+				<ProductKey>
+					<!-- Empty key: Setup installs without prompting for a product key. -->
+					<Key/>
+				</ProductKey>
+			</UserData>
+			<UseConfigurationSet>false</UseConfigurationSet>
+		</component>
+	</settings>
+	<settings pass="specialize">
+		<component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+			<RunSynchronous>
+				<RunSynchronousCommand wcm:action="add">
+					<Order>1</Order>
+					<Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
+					<Description>Re-enable the offline "I don't have internet" OOBE path (required on 24H2/25H2/26H2)</Description>
+				</RunSynchronousCommand>
+				<RunSynchronousCommand wcm:action="add">
+					<Order>2</Order>
+					<Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisableOnline /t REG_DWORD /d 1 /f</Path>
+					<Description>Stop OOBE from demanding a network connection or a Microsoft account</Description>
+				</RunSynchronousCommand>
+			</RunSynchronous>
+		</component>
+	</settings>
+	<settings pass="oobeSystem">
+		<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+			<UserAccounts>
+				<LocalAccounts>
+					<LocalAccount wcm:action="add">
+						<Name>Admin</Name>
+						<DisplayName>Admin</DisplayName>
+						<Description>Local administrator</Description>
+						<Group>Administrators</Group>
+						<Password>
+							<!-- Blank password. Add a <Value> and keep PlainText true to set one. -->
+							<Value></Value>
+							<PlainText>true</PlainText>
+						</Password>
+					</LocalAccount>
+				</LocalAccounts>
+			</UserAccounts>
+			<AutoLogon>
+				<Username>Admin</Username>
+				<Enabled>true</Enabled>
+				<LogonCount>1</LogonCount>
+				<Password>
+					<Value></Value>
+					<PlainText>true</PlainText>
+				</Password>
+			</AutoLogon>
+			<OOBE>
+				<HideEULAPage>true</HideEULAPage>
+				<HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+				<HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+				<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+				<ProtectYourPC>3</ProtectYourPC>
+			</OOBE>
+			<FirstLogonCommands>
+				<SynchronousCommand wcm:action="add">
+					<Order>1</Order>
+					<Description>Turn auto-logon back off now that the account has been created</Description>
+					<CommandLine>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d 0 /f</CommandLine>
+				</SynchronousCommand>
+			</FirstLogonCommands>
+		</component>
+	</settings>
 </unattend>

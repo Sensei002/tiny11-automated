@@ -5,7 +5,9 @@
 	<settings pass="windowsPE">
 		<component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
 			<DynamicUpdate>
-				<WillShowUI>OnError</WillShowUI>
+				<!-- Never pull setup updates from the internet - keeps the install offline. -->
+				<Enable>false</Enable>
+				<WillShowUI>Never</WillShowUI>
 			</DynamicUpdate>
 			<ImageInstall>
 				<OSImage>
@@ -21,8 +23,8 @@
 			</ImageInstall>
 			<UserData>
 				<ProductKey>
-					<Key>00000-00000-00000-00000-00000</Key>
-					<WillShowUI>Always</WillShowUI>
+					<!-- Empty key: Setup installs without prompting for a product key. -->
+					<Key/>
 				</ProductKey>
 				<AcceptEula>true</AcceptEula>
 			</UserData>
@@ -56,6 +58,14 @@
 					<Order>5</Order>
 					<Path>reg.exe unload "HKU\DefaultUser"</Path>
 				</RunSynchronousCommand>
+				<RunSynchronousCommand wcm:action="add">
+					<Order>6</Order>
+					<Path>reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v BypassNRO /t REG_DWORD /d 1 /f</Path>
+				</RunSynchronousCommand>
+				<RunSynchronousCommand wcm:action="add">
+					<Order>7</Order>
+					<Path>reg.exe add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisableOnline /t REG_DWORD /d 1 /f</Path>
+				</RunSynchronousCommand>
 			</RunSynchronous>
 		</component>
 	</settings>
@@ -64,13 +74,22 @@
 	<settings pass="oobeSystem">
 		<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
 			<UserAccounts>
-				<AdministratorPassword>
-					<Value></Value>
-					<PlainText>true</PlainText>
-				</AdministratorPassword>
+				<LocalAccounts>
+					<LocalAccount wcm:action="add">
+						<Name>Admin</Name>
+						<DisplayName>Admin</DisplayName>
+						<Description>Local administrator</Description>
+						<Group>Administrators</Group>
+						<Password>
+							<!-- Blank password. Add a <Value> and keep PlainText true to set one. -->
+							<Value></Value>
+							<PlainText>true</PlainText>
+						</Password>
+					</LocalAccount>
+				</LocalAccounts>
 			</UserAccounts>
 			<AutoLogon>
-				<Username>Administrator</Username>
+				<Username>Admin</Username>
 				<Enabled>true</Enabled>
 				<LogonCount>1</LogonCount>
 				<Password>
@@ -81,8 +100,9 @@
 			<OOBE>
 				<ProtectYourPC>3</ProtectYourPC>
 				<HideEULAPage>true</HideEULAPage>
+				<HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
 				<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
-				<HideOnlineAccountScreens>false</HideOnlineAccountScreens>
+				<HideOnlineAccountScreens>true</HideOnlineAccountScreens>
 			</OOBE>
 			<FirstLogonCommands>
 				<SynchronousCommand wcm:action="add">

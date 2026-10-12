@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Headless script to build a minimized Windows 11 Core image for CI/CD automation.
 
@@ -99,6 +99,59 @@ function Write-Log {
     $logMessage = "[$timestamp] [$Level] $Message"
     Write-Output $logMessage
     Add-Content -Path $logFile -Value $logMessage -ErrorAction SilentlyContinue
+}
+
+function Write-IsoAnswerFile {
+    # Copies the unattend template to $Destination, rewriting the /IMAGE/INDEX
+    # placeholder so the edition chosen with -INDEX is the one that actually gets
+    # installed. The static template hard-codes index 1, so without this rewrite a
+    # Pro/Education build would silently install Home.
+    #
+    # The content is parsed as XML before it is written: Windows Setup hard-fails on
+    # a malformed answer file, and a rejected answer file is exactly how the OOBE /
+    # local-account automation silently stops working.
+    param(
+        [Parameter(Mandatory=$true)][string]$Destination,
+        [Parameter(Mandatory=$false)][string]$Template
+    )
+
+    if (-not $Template) {
+        $Template = @(
+            (Join-Path $PSScriptRoot "autounattend.xml"),
+            (Join-Path (Split-Path $PSScriptRoot -Parent) "autounattend.xml")
+        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+
+    if (-not $Template -or -not (Test-Path $Template)) {
+        Write-Log "No unattend template found - OOBE will not be automated" "WARN"
+        return
+    }
+
+    try {
+        $content = Get-Content -LiteralPath $Template -Raw
+        $content = [regex]::Replace(
+            $content,
+            '(<Key>/IMAGE/INDEX</Key>\s*<Value>)\d+(</Value>)',
+            ('${1}' + $INDEX + '${2}')
+        )
+
+        # Throws if the template is not well-formed XML - we want that to be loud.
+        $null = [xml]$content
+
+        $destDir = Split-Path -Parent $Destination
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        }
+
+        # UTF-8 without BOM - Setup is happier without a BOM on the answer file.
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($Destination, $content, $utf8NoBom)
+
+        Write-Log "Wrote unattended answer file to $Destination (IMAGE/INDEX = $INDEX)"
+    } catch {
+        Write-Log "Failed to write answer file to ${Destination}: $_" "ERROR"
+        throw
+    }
 }
 
 function Test-Prerequisites {
@@ -762,14 +815,17 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableConsumerAccountStateContent' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableCloudOptimizedContent' 'REG_DWORD' '1'
 
-    # Enable local accounts on OOBE
+    # Out-of-the-box offline local account.
+    # BypassNRO re-enables the "I don't have internet" path Microsoft removed from
+    # the OOBE UI in 24H2+, and DisableOnline stops OOBE demanding a network
+    # connection before it will continue. These are belt-and-braces - the real
+    # guarantee is the pre-created local account in autounattend.xml.
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'BypassNRO' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'DisableOnline' 'REG_DWORD' '1'
 
-    # Copy autounattend.xml if exists
-    if (Test-Path "$PSScriptRoot\autounattend.xml") {
-        Copy-Item -Path "$PSScriptRoot\autounattend.xml" -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -Force
-        Write-Log "Copied autounattend.xml"
-    }
+    # Bake the answer file into the image too, so a later sysprep /generalize keeps
+    # the same OOBE behaviour.
+    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml"
 
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
@@ -806,14 +862,17 @@ function Apply-RegistryTweaks {
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableConsumerAccountStateContent' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' 'DisableCloudOptimizedContent' 'REG_DWORD' '1'
 
-    # Enable local accounts on OOBE
+    # Out-of-the-box offline local account.
+    # BypassNRO re-enables the "I don't have internet" path Microsoft removed from
+    # the OOBE UI in 24H2+, and DisableOnline stops OOBE demanding a network
+    # connection before it will continue. These are belt-and-braces - the real
+    # guarantee is the pre-created local account in autounattend.xml.
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'BypassNRO' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'DisableOnline' 'REG_DWORD' '1'
 
-    # Copy autounattend.xml if exists
-    if (Test-Path "$PSScriptRoot\autounattend.xml") {
-        Copy-Item -Path "$PSScriptRoot\autounattend.xml" -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -Force
-        Write-Log "Copied autounattend.xml"
-    }
+    # Bake the answer file into the image too, so a later sysprep /generalize keeps
+    # the same OOBE behaviour.
+    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml"
 
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
@@ -1163,10 +1222,17 @@ function Convert-ToESD {
 function Create-TinyISO {
     Write-Log "Creating ISO image..."
 
-    # Copy autounattend.xml to ISO root for OOBE bypass
-    if (Test-Path "$PSScriptRoot\autounattend.xml") {
-        Copy-Item -Path "$PSScriptRoot\autounattend.xml" -Destination "$tiny11Dir\autounattend.xml" -Force
-        Write-Log "Copied autounattend.xml to ISO root"
+    # The answer file at the ISO root is the one Windows Setup auto-detects when
+    # booting the media. Write-IsoAnswerFile also pins the edition index into it.
+    Write-IsoAnswerFile -Destination "$tiny11Dir\autounattend.xml"
+
+    # Report the size of the install image. This is the file that drives the UDF
+    # version choice below, so it is worth having it in the build log.
+    foreach ($img in @("$tiny11Dir\sources\install.wim", "$tiny11Dir\sources\install.esd")) {
+        if (Test-Path $img) {
+            $imgGB = [math]::Round((Get-Item $img).Length / 1GB, 2)
+            Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgGB}GB"
+        }
     }
 
     # Verify boot files exist before creating ISO
@@ -1202,9 +1268,24 @@ function Create-TinyISO {
         $OSCDIMG = $localOSCDIMGPath
     }
 
+    # ---- Ventoy compatibility -------------------------------------------------
+    # -u2        ISO9660 + Joliet + UDF, exactly what Microsoft's own retail media
+    #            uses. ISO9660 alone cannot hold a >4 GB file, so the UDF layer is
+    #            what carries install.wim.
+    # -udfver150 UDF 1.50 instead of 1.02.
+    #
+    # UDF 1.02 cannot describe a file larger than 4 GB. A trimmed install.wim or
+    # install.esd is routinely bigger than that. oscdimg still writes the file, but
+    # the on-disc metadata ends up in a form that lenient readers (Windows' own UDF
+    # driver, which is what Rufus and Explorer use) accept and lean readers
+    # (Ventoy's virtual optical drive, which is what booting the ISO as a file
+    # relies on) mis-parse. The result is that Setup can no longer see the
+    # installation media and reports "A media driver your computer needs is
+    # missing". UDF 1.50 describes large files with proper 64-bit extents and is
+    # read correctly by both.
     # Build the ISO
     Write-Log "Building bootable ISO (this may take 5-10 minutes)..."
-    & $OSCDIMG '-m' '-o' '-u2' '-udfver102' `
+    & $OSCDIMG '-m' '-o' '-u2' '-udfver150' `
         "-bootdata:2#p0,e,b$tiny11Dir\boot\etfsboot.com#pEF,e,b$tiny11Dir\efi\microsoft\boot\efisys.bin" `
         $tiny11Dir $outputISO | Out-Null
 
