@@ -184,7 +184,7 @@ Set-ExecutionPolicy Bypass -Scope Process
   <tr>
     <td><strong>Windows Defender</strong></td>
     <td>✅ Included</td>
-    <td>❌ Disabled</td>
+    <td>⚙️ Disabled (removable via <code>-RemoveDefender</code>)</td>
     <td>❌ Removed</td>
   </tr>
   <tr>
@@ -259,6 +259,7 @@ tiny11-automated/
     -INDEX <int>               # Image index (1=Home, 4=Education, 6=Pro, 7=Pro N)
     [-SCRATCH <string>]        # Optional: Scratch disk (default: script directory)
     [-SkipCleanup]             # Optional: Keep temp files for debugging
+    [-AccountSetup <string>]   # Optional: "auto-admin" (default) | "classic"
 ```
 
 ### Core-Only Parameter
@@ -267,7 +268,23 @@ tiny11-automated/
 .\tiny11coremaker-headless.ps1
     [-ENABLE_DOTNET35]         # Enable .NET Framework 3.5 support
     [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x8007000B)
+    [-RemoveDefender]          # Completely remove Windows Defender / Security (no Antimalware service)
 ```
+
+### Account Setup (Standard & Core)
+
+`-AccountSetup` controls how the local account is created on first boot, and
+applies to both `tiny11maker-headless.ps1` and `tiny11coremaker-headless.ps1`:
+
+| Value | Behaviour |
+|-------|-----------|
+| `auto-admin` *(default)* | Pre-creates a local administrator called `Admin` with a blank password, auto-logon on first boot, OOBE skipped entirely. |
+| `classic` | OOBE runs offline so **you** create your own local account with your own name. Still no Microsoft account and no network required. |
+
+Either way the install stays fully offline: `DynamicUpdate` is disabled and
+`BypassNRO` / `DisableOnline` are set, so Setup never reaches a Microsoft
+account screen.
+
 
 ### Nano Variant
 
@@ -291,6 +308,12 @@ tiny11-automated/
 
 # Core build targeting real hardware (preserves WinRE to avoid 0x8007000B on 24H2, 25H2 and 26H2)
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -PreserveWinRE
+
+# Core build with Windows Defender / Security completely removed (no Antimalware service)
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -RemoveDefender
+
+# Classic setup: create your own local account with your own name during OOBE
+.\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 1 -AccountSetup classic
 
 # Nano build with WinRE preserved (real hardware use)
 .\scripts\nano11builder-headless.ps1 -ISO E -INDEX 1 -PreserveWinRE
@@ -376,7 +399,7 @@ tiny11-automated/
 - Steps Recorder
 - LA57 CPU compatibility layer
 - Language features (OCR, Speech, Handwriting)
-- Windows Defender (Core/Nano only)
+- Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input)
 - Printer drivers (Nano only)
 - Scanner/MFD drivers (Nano only)
 
@@ -546,6 +569,16 @@ the build log (`scripts/*.log`, kept by running the workflow with `skip_cleanup:
 Every ISO built here installs **with no internet connection and no Microsoft
 account**. There is nothing to type at `Shift+F10` and no `BYPASSNRO` dance.
 
+Two account modes are available — pick one with the `account_setup` workflow
+input, or `-AccountSetup` on the builders:
+
+- **`auto-admin`** *(default)* — the account described below is created for you
+  and OOBE is skipped entirely.
+- **`classic`** — OOBE runs offline and **you** create the local account with
+  your own name. Still no Microsoft account and no network required.
+
+The table below describes the default `auto-admin` mode:
+
 | Setting | Value |
 |---------|-------|
 | Account name | `Admin` |
@@ -600,6 +633,13 @@ image_index:            # Windows edition
 skip_cleanup:           # Debug mode (keep artifacts)
   type: boolean
   default: false
+
+account_setup:          # 🆕 Local account setup
+  type: choice
+  options: [auto-admin, classic]
+  # auto-admin = automatically create the local account "Admin" (OOBE skipped)
+  # classic    = you create your own local account with your name during setup
+  default: auto-admin
 ```
 
 #### 2. Build Tiny11 Core (Ultra-Minimal)
@@ -616,6 +656,18 @@ enable_dotnet35:        # 🆕 Enable .NET Framework 3.5
 preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
   type: boolean
   default: false
+
+remove_defender:        # 🆕 Completely remove Windows Defender / Security
+  type: boolean
+  default: false
+  # No Antimalware service will be present in the finished image
+
+account_setup:          # 🆕 Local account setup
+  type: choice
+  options: [auto-admin, classic]
+  # auto-admin = automatically create the local account "Admin" (OOBE skipped)
+  # classic    = you create your own local account with your name during setup
+  default: auto-admin
 ```
 
 #### 3. Build Nano11 (EXTREME Minimal)

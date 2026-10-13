@@ -19,9 +19,17 @@
 .PARAMETER SkipCleanup
     Skip cleanup of temporary files after ISO creation (optional, for debugging)
 
+.PARAMETER AccountSetup
+    How the local account is set up on first boot (optional, default 'auto-admin'):
+      auto-admin - pre-create a local administrator called 'Admin', blank password,
+                   auto-logon on first boot, OOBE skipped entirely.
+      classic    - let OOBE run offline so the person installing creates their own
+                   local account with their own name. No Microsoft account.
+
 .EXAMPLE
     .\tiny11maker-headless.ps1 -ISO E -INDEX 1
     .\tiny11maker-headless.ps1 -ISO E -INDEX 6 -SCRATCH D
+    .\tiny11maker-headless.ps1 -ISO E -INDEX 6 -AccountSetup classic
 
 .NOTES
     Original Author: ntdevlabs
@@ -49,7 +57,11 @@ param (
     [string]$SCRATCH,
     
     [Parameter(Mandatory=$false, HelpMessage="Skip cleanup of temporary files")]
-    [switch]$SkipCleanup
+    [switch]$SkipCleanup,
+
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
+    [ValidateSet('auto-admin', 'classic')]
+    [string]$AccountSetup = 'auto-admin'
 )
 
 #---------[ Error Handling ]---------#
@@ -90,7 +102,10 @@ function Write-IsoAnswerFile {
     # local-account automation silently stops working.
     param(
         [Parameter(Mandatory=$true)][string]$Destination,
-        [Parameter(Mandatory=$false)][string]$Template
+        [Parameter(Mandatory=$false)][string]$Template,
+        [Parameter(Mandatory=$false)]
+        [ValidateSet('auto-admin', 'classic')]
+        [string]$AccountMode = 'auto-admin'
     )
 
     if (-not $Template) {
@@ -113,6 +128,24 @@ function Write-IsoAnswerFile {
             ('${1}' + $INDEX + '${2}')
         )
 
+        # Account mode 'classic': drop the pre-created account, the auto-logon and
+        # the first-logon cleanup so Windows Setup runs OOBE and the person
+        # installing creates their own local account with their own name.
+        #
+        # Everything else in the template is kept, so the install stays fully
+        # offline: DynamicUpdate stays off, the online-account screens stay hidden
+        # and BypassNRO / DisableOnline stay set. The result is the classic
+        # "create a local account" OOBE with no Microsoft account and no network.
+        #
+        # These three elements never nest inside an element of the same name in
+        # the template, so a non-greedy block match is unambiguous. The result is
+        # re-parsed as XML below, so a bad edit here fails the build loudly.
+        if ($AccountMode -eq 'classic') {
+            $content = [regex]::Replace($content, '(?s)\s*<UserAccounts>.*?</UserAccounts>', '')
+            $content = [regex]::Replace($content, '(?s)\s*<AutoLogon>.*?</AutoLogon>', '')
+            $content = [regex]::Replace($content, '(?s)\s*<FirstLogonCommands>.*?</FirstLogonCommands>', '')
+        }
+
         # Throws if the template is not well-formed XML - we want that to be loud.
         $null = [xml]$content
 
@@ -125,7 +158,7 @@ function Write-IsoAnswerFile {
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($Destination, $content, $utf8NoBom)
 
-        Write-Log "Wrote unattended answer file to $Destination (IMAGE/INDEX = $INDEX)"
+        Write-Log "Wrote unattended answer file to $Destination (IMAGE/INDEX = $INDEX, account mode = $AccountMode)"
     } catch {
         Write-Log "Failed to write answer file to ${Destination}: $_" "ERROR"
         throw
@@ -605,7 +638,7 @@ function Apply-RegistryTweaks {
 
     # Bake the answer file into the image too, so a later sysprep /generalize keeps
     # the same OOBE behaviour.
-    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -AccountMode $AccountSetup
     
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
@@ -910,7 +943,7 @@ function Create-TinyISO {
     
     # The answer file at the ISO root is the one Windows Setup auto-detects when
     # booting the media. Write-IsoAnswerFile also pins the edition index into it.
-    Write-IsoAnswerFile -Destination "$tiny11Dir\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$tiny11Dir\autounattend.xml" -AccountMode $AccountSetup
     
     # Guard: an ISO with no usable install image produces exactly the symptom
     # "A media driver your computer needs is missing" when Setup looks for its media,
@@ -1034,7 +1067,7 @@ function Invoke-Cleanup {
 try {
     Write-Log "=== Tiny11 Headless Builder Started ===" "INFO"
     Write-Log "Author: kelexine (https://github.com/kelexine)"
-    Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk"
+    Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk, AccountSetup=$AccountSetup"
     
     Test-Prerequisites
     
