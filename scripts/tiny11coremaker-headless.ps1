@@ -595,12 +595,18 @@ function Patch-ReAgentXml {
 </WindowsRE>
 '@
 
-    try {
-        $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-        if (-not (Test-Path $recoveryDir)) {
-            New-Item -ItemType Directory -Force -Path $recoveryDir | Out-Null
-        }
+    # Only ever patch a ReAgent.xml that is already there. Creating the file (and
+    # its parent directory) inside boot.wim adds entries the stock image does not
+    # have, which is a gratuitous deviation from Microsoft's boot media - and the
+    # boot media is precisely what third-party boot managers such as Ventoy
+    # inspect and patch. The registry values set alongside this
+    # (SkipInstallingWinRE / DisableRecovery / WinREEnabled) already suppress WinRE.
+    if (-not (Test-Path -LiteralPath $reagentXmlPath)) {
+        Write-Log "No ReAgent.xml at $reagentXmlPath - nothing to patch"
+        return
+    }
 
+    try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($reagentXmlPath, $cleanXml.TrimStart(), $utf8NoBom)
         Write-Log "ReAgent.xml patched: all WinRE state/staging fields zeroed."
@@ -1143,6 +1149,14 @@ function Dismount-AndExport {
     & Dism.exe /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:$INDEX `
         /DestinationImageFile:$tempWim /Compress:max | Out-Null
 
+    # Never delete the source image if the export above failed. A failed export that
+    # still deletes install.wim leaves the ISO with no install image at all, and
+    # Windows Setup reports that as "A media driver your computer needs is missing"
+    # - which looks like a USB or driver fault and hides the real cause.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tempWim)) {
+        throw "DISM /Export-Image failed (exit code $LASTEXITCODE). Refusing to delete $wimFilePath."
+    }
+
     Remove-Item -Path $wimFilePath -Force
     Rename-Item -Path $tempWim -NewName "install.wim"
 
@@ -1185,7 +1199,22 @@ function Process-BootImage {
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Setup\Recovery' 'DisableRecovery' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSYSTEM\Setup' 'CmdLine' 'REG_SZ' 'X:\sources\setup.exe'
+
+    # NOTE: this build deliberately does NOT rewrite HKLM\SYSTEM\Setup\CmdLine.
+    #
+    # It used to be forced to a bare 'X:\sources\setup.exe'. That overwrite is the
+    # one boot-image change Standard does not make, and it lands squarely on the
+    # value a third-party boot manager has to hook in order to work:
+    #
+    #   Ventoy does not extract an ISO. It boots the ISO's own boot.wim and injects
+    #   vtoyjump.exe so that vtoyjump can mount the ISO as a virtual drive before
+    #   setup.exe runs. The injection targets the WinPE setup launch chain, i.e.
+    #   HKLM\SYSTEM\Setup\CmdLine / winpeshl. Leave the stock value alone and the
+    #   hook still matches; overwrite it with a value the patcher does not expect
+    #   and vtoyjump never runs, no virtual drive appears, and Windows Setup
+    #   reports "A media driver your computer needs is missing".
+    #
+    # The stock media launches Setup on its own, so nothing here needs to set it.
 
     # If winre.wim was removed from the OS image, patch ReAgent.xml in boot.wim as well
     # so SetupHost does not attempt to stage SafeOS from Install.esd during WinPE setup (bypasses error 0x80070003 at 11%)
@@ -1213,6 +1242,12 @@ function Convert-ToESD {
     $esdPath = "$tiny11Dir\sources\install.esd"
     & dism /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:1 /DestinationImageFile:$esdPath /Compress:recovery
 
+    # Same guard as Dismount-AndExport: never delete the source WIM unless the ESD
+    # export actually succeeded.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $esdPath)) {
+        throw "DISM /Export-Image to install.esd failed (exit code $LASTEXITCODE). Refusing to delete $wimFilePath."
+    }
+
     # Remove the WIM file
     Remove-Item $wimFilePath -Force
 
@@ -1226,12 +1261,31 @@ function Create-TinyISO {
     # booting the media. Write-IsoAnswerFile also pins the edition index into it.
     Write-IsoAnswerFile -Destination "$tiny11Dir\autounattend.xml"
 
-    # Report the size of the install image. This is the file that drives the UDF
-    # version choice below, so it is worth having it in the build log.
-    foreach ($img in @("$tiny11Dir\sources\install.wim", "$tiny11Dir\sources\install.esd")) {
-        if (Test-Path $img) {
-            $imgGB = [math]::Round((Get-Item $img).Length / 1GB, 2)
-            Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgGB}GB"
+    # Guard: an ISO with no usable install image produces exactly the symptom
+    # "A media driver your computer needs is missing" when Setup looks for its media,
+    # which is easy to misread as a USB or driver fault. Fail the build here rather
+    # than shipping it.
+    $installImages = @("$tiny11Dir\sources\install.wim", "$tiny11Dir\sources\install.esd") |
+        Where-Object { Test-Path $_ }
+
+    if (-not $installImages) {
+        throw "No install.wim or install.esd in $tiny11Dir\sources - the image export step failed. Refusing to build an ISO that Setup cannot install from."
+    }
+
+    foreach ($img in $installImages) {
+        $imgMB = [math]::Round((Get-Item $img).Length / 1MB, 1)
+        Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgMB}MB"
+        if ($imgMB -lt 500) {
+            throw "Install image $img is only ${imgMB}MB - it looks truncated. Refusing to build the ISO."
+        }
+    }
+
+    # A leftover export would confuse Setup's media detection.
+    foreach ($stray in @('install2.wim', 'install2.esd')) {
+        $strayPath = Join-Path "$tiny11Dir\sources" $stray
+        if (Test-Path $strayPath) {
+            Write-Log "Removing leftover $stray from sources\" "WARN"
+            Remove-Item -Path $strayPath -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -1268,21 +1322,14 @@ function Create-TinyISO {
         $OSCDIMG = $localOSCDIMGPath
     }
 
-    # ---- Ventoy compatibility -------------------------------------------------
-    # -u2        ISO9660 + Joliet + UDF, exactly what Microsoft's own retail media
+    # ---- ISO container --------------------------------------------------------
+    # -u2        ISO9660 + Joliet + UDF, the layout Microsoft's own retail media
     #            uses. ISO9660 alone cannot hold a >4 GB file, so the UDF layer is
     #            what carries install.wim.
-    # -udfver150 UDF 1.50 instead of 1.02.
-    #
-    # UDF 1.02 cannot describe a file larger than 4 GB. A trimmed install.wim or
-    # install.esd is routinely bigger than that. oscdimg still writes the file, but
-    # the on-disc metadata ends up in a form that lenient readers (Windows' own UDF
-    # driver, which is what Rufus and Explorer use) accept and lean readers
-    # (Ventoy's virtual optical drive, which is what booting the ISO as a file
-    # relies on) mis-parse. The result is that Setup can no longer see the
-    # installation media and reports "A media driver your computer needs is
-    # missing". UDF 1.50 describes large files with proper 64-bit extents and is
-    # read correctly by both.
+    # -udfver150 UDF 1.50 rather than 1.02. UDF 1.02 cannot describe a single file
+    #            larger than 4 GB and a Standard install.wim can exceed that. This
+    #            is a robustness fix only - it is NOT what made Ventoy fail. See
+    #            "Booting a Tiny11 ISO from Ventoy" in README.md for that.
     # Build the ISO
     Write-Log "Building bootable ISO (this may take 5-10 minutes)..."
     & $OSCDIMG '-m' '-o' '-u2' '-udfver150' `

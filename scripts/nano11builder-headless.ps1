@@ -826,14 +826,17 @@ function Patch-ReAgentXml {
 </WindowsRE>
 '@
 
-    try {
-        # Ensure the Recovery directory exists (it should, but be defensive)
-        $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-        if (-not (Test-Path $recoveryDir)) {
-            New-Item -ItemType Directory -Force -Path $recoveryDir | Out-Null
-            Write-Log "Created missing Recovery directory."
-        }
+    # Only ever patch a ReAgent.xml that is already there. Creating the file (and
+    # its parent directory) inside boot.wim adds entries the stock image does not
+    # have, which is a gratuitous deviation from Microsoft's boot media - and the
+    # boot media is precisely what third-party boot managers such as Ventoy
+    # inspect and patch.
+    if (-not (Test-Path -LiteralPath $reagentXmlPath)) {
+        Write-Log "No ReAgent.xml at $reagentXmlPath - nothing to patch"
+        return
+    }
 
+    try {
         # Write as UTF-8 without BOM — reagentc expects plain UTF-8
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($reagentXmlPath, $cleanXml.TrimStart(), $utf8NoBom)
@@ -1286,6 +1289,14 @@ function Dismount-AndExport {
     $tempWim = "$nano11Dir\sources\install2.wim"
     & Dism.exe /English /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:$INDEX /DestinationImageFile:$tempWim /Compress:max
 
+    # Never delete the source image if the export above failed. A failed export that
+    # still deletes install.wim leaves the ISO with no install image at all, and
+    # Windows Setup reports that as "A media driver your computer needs is missing"
+    # - which looks like a USB or driver fault and hides the real cause.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tempWim)) {
+        throw "DISM /Export-Image failed (exit code $LASTEXITCODE). Refusing to delete $wimFilePath."
+    }
+
     Remove-Item -Path $wimFilePath -Force
     Rename-Item -Path $tempWim -NewName "install.wim"
 
@@ -1367,6 +1378,12 @@ function Convert-ToESD {
     Write-Log "Converting to ESD format for maximum compression..."
     $esdPath = "$nano11Dir\sources\install.esd"
     & dism /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:1 /DestinationImageFile:$esdPath /Compress:recovery
+    # Same guard as Dismount-AndExport: never delete the source WIM unless the ESD
+    # export actually succeeded.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $esdPath)) {
+        throw "DISM /Export-Image to install.esd failed (exit code $LASTEXITCODE). Refusing to delete $wimFilePath."
+    }
+
     Remove-Item $wimFilePath -Force -ErrorAction SilentlyContinue
     Write-Log "ESD conversion complete"
 }
@@ -1390,12 +1407,31 @@ function Create-NanoISO {
     # booting the media. Write-IsoAnswerFile also pins the edition index into it.
     Write-IsoAnswerFile -Destination "$nano11Dir\autounattend.xml"
 
-    # Report the size of the install image. This is the file that drives the UDF
-    # version choice below, so it is worth having it in the build log.
-    foreach ($img in @("$nano11Dir\sources\install.wim", "$nano11Dir\sources\install.esd")) {
-        if (Test-Path $img) {
-            $imgGB = [math]::Round((Get-Item $img).Length / 1GB, 2)
-            Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgGB}GB"
+    # Guard: an ISO with no usable install image produces exactly the symptom
+    # "A media driver your computer needs is missing" when Setup looks for its media,
+    # which is easy to misread as a USB or driver fault. Fail the build here rather
+    # than shipping it.
+    $installImages = @("$nano11Dir\sources\install.wim", "$nano11Dir\sources\install.esd") |
+        Where-Object { Test-Path $_ }
+
+    if (-not $installImages) {
+        throw "No install.wim or install.esd in $nano11Dir\sources - the image export step failed. Refusing to build an ISO that Setup cannot install from."
+    }
+
+    foreach ($img in $installImages) {
+        $imgMB = [math]::Round((Get-Item $img).Length / 1MB, 1)
+        Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgMB}MB"
+        if ($imgMB -lt 500) {
+            throw "Install image $img is only ${imgMB}MB - it looks truncated. Refusing to build the ISO."
+        }
+    }
+
+    # A leftover export would confuse Setup's media detection.
+    foreach ($stray in @('install2.wim', 'install2.esd')) {
+        $strayPath = Join-Path "$nano11Dir\sources" $stray
+        if (Test-Path $strayPath) {
+            Write-Log "Removing leftover $stray from sources\" "WARN"
+            Remove-Item -Path $strayPath -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -1427,20 +1463,14 @@ function Create-NanoISO {
         $OSCDIMG = $localOSCDIMGPath
     }
 
-    # ---- Ventoy compatibility -------------------------------------------------
-    # -u2        ISO9660 + Joliet + UDF, exactly what Microsoft's own retail media
+    # ---- ISO container --------------------------------------------------------
+    # -u2        ISO9660 + Joliet + UDF, the layout Microsoft's own retail media
     #            uses. ISO9660 alone cannot hold a >4 GB file, so the UDF layer is
     #            what carries install.wim / install.esd.
-    # -udfver150 UDF 1.50 instead of 1.02.
-    #
-    # UDF 1.02 cannot describe a file larger than 4 GB. oscdimg still writes the
-    # file, but the on-disc metadata ends up in a form that lenient readers
-    # (Windows' own UDF driver, which is what Rufus and Explorer use) accept and
-    # lean readers (Ventoy's virtual optical drive, which is what booting the ISO
-    # as a file relies on) mis-parse. The result is that Setup can no longer see
-    # the installation media and reports "A media driver your computer needs is
-    # missing". UDF 1.50 describes large files with proper 64-bit extents and is
-    # read correctly by both.
+    # -udfver150 UDF 1.50 rather than 1.02. UDF 1.02 cannot describe a single file
+    #            larger than 4 GB. This is a robustness fix only - it is NOT what
+    #            made Ventoy fail. See "Booting a Tiny11 ISO from Ventoy" in
+    #            README.md for that.
     Write-Log "Building bootable ISO..."
     & $OSCDIMG '-m' '-o' '-u2' '-udfver150' `
         "-bootdata:2#p0,e,b$nano11Dir\boot\etfsboot.com#pEF,e,b$nano11Dir\efi\microsoft\boot\efisys.bin" `

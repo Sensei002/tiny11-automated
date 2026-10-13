@@ -476,39 +476,70 @@ tiny11-automated/
 
 ### 🖥️ Booting a Tiny11 ISO from Ventoy
 
-ISOs built by this project are designed to boot straight from Ventoy in its
-**default (non-wimboot) mode** — no Rufus, no extracted USB stick, no `Ctrl+W`.
+ISOs built by this project boot straight from Ventoy in its **default (non-wimboot)
+mode** — no Rufus, no extracted USB stick, no manual patching. Verified booting into
+Windows Setup on Windows 11 26H2, for both Standard and Core.
 
-Earlier builds failed on Ventoy with:
+If you are on an older build and see:
 
 > *"A media driver your computer needs is missing. This could be a DVD, USB, or Hard disk driver."*
 
-**Why it happened.** Ventoy does not extract a Windows ISO. It maps the ISO file as
-a **virtual optical drive** by injecting `ventoy.sys` into the booted Windows PE, and
-Windows Setup then reads `\sources\install.wim` off that virtual drive. The ISOs were
-being built with `oscdimg -u2 -udfver102`, i.e. **UDF 1.02**. UDF 1.02 cannot describe
-a single file larger than 4 GB, and a trimmed `install.wim` / `install.esd` is
-routinely bigger than that. oscdimg still writes the file, but the on-disc metadata
-ends up in a form that lenient readers accept and lean readers mis-parse — so Setup
-could no longer see the installation media. Windows' own UDF driver copes with it,
-which is exactly why the *same* ISO installed fine once Rufus had extracted it.
+…that was a bug in this project, and it is fixed. **Rebuild your ISO** (or grab a fresh
+release) — nothing about your Ventoy stick needs to change.
 
-**What changed.** All three builders now emit **UDF 1.50** (`-u2 -udfver150`), which
-describes large files with proper 64-bit extents and is read correctly by both
-Ventoy and Windows. The ISO container otherwise stays identical to Microsoft's own
-retail media layout (`-u2` = ISO9660 + Joliet + UDF, same El Torito boot entries).
+#### What the bug was
 
-**Before reporting that it still fails, check these three things:**
+The wording is misleading: it is **not** a missing disk driver. It means the
+**virtual optical drive never came up**.
+
+Ventoy does not extract a Windows ISO. It boots the ISO's own `boot.wim` and injects
+`vtoyjump.exe` into that Windows PE. `vtoyjump` mounts the ISO as a virtual drive, and
+only then does `setup.exe` start and read `\sources\install.wim` from it. If `vtoyjump`
+never runs, Setup finds no media and reports a missing driver.
+
+Because that injection rides on the WinPE setup launch chain, changes a builder makes
+inside `boot.wim` can break it. Two did:
+
+| Change | Why it broke Ventoy |
+|--------|---------------------|
+| `HKLM\SYSTEM\Setup\CmdLine` was overwritten with a bare `X:\sources\setup.exe` | That registry value is the hook Ventoy's patcher matches. Overwriting it stopped `vtoyjump` from running, so no virtual drive appeared. **Core-only** — which is why Standard kept working. |
+| A `ReAgent.xml` was created inside `boot.wim` where the stock image has none | Adding files to `boot.wim` makes it diverge from Microsoft's boot media — exactly what Ventoy inspects and patches. Only pre-existing files are patched now. |
+
+Fixed in commit
+[`8ae6bd9`](https://github.com/Sensei002/tiny11-automated/commit/8ae6bd9).
+
+#### If it ever stops working again
+
+Press **`Shift+F10`** at the error and run:
+
+```
+diskpart
+list volume
+exit
+type X:\Windows\System32\ventoy\vtoype.log
+```
+
+* **No virtual DVD drive in `list volume`** → `vtoyjump` never ran, so the problem is
+  the `boot.wim` patch rather than the ISO contents.
+* **`vtoype.log`** records what `vtoyjump` did and why a mount failed. It is the log
+  the Ventoy author asks for in bug reports — please attach it to any issue.
+* **`Ctrl+W`** at the Ventoy menu switches to **wimboot** mode, a completely different
+  boot path worth trying as a workaround.
+
+Also worth checking:
 
 | Check | Why it matters |
 |-------|----------------|
-| Ventoy **1.1.07 or newer** | Older releases have known virtual-optical-drive bugs |
-| Ventoy data partition is **NTFS**, not exFAT | exFAT is a documented cause of this exact error with Windows ISOs |
+| Ventoy **1.1.07 or newer** | Older releases have known virtual-drive bugs |
+| Data partition is **NTFS**, not exFAT | exFAT is a documented cause of this error |
 | The ISO is **not** on the 32 MB `VTOYEFI` partition | Ventoy only scans the first, large partition |
+| Core/Nano on real hardware: pass **`-PreserveWinRE`** | These variants delete `winre.wim` by default, which is documented to break real-hardware installs on 24H2+ |
 
-If it still fails, please open an issue with the build log (`scripts/*.log`, kept by
-running the workflow with `skip_cleanup: true`). The log now records the size of the
-install image, which is the file that drives all of this.
+The build now also refuses to emit an ISO whose `sources\` has no usable
+`install.wim`/`install.esd`, because that failure looks identical to this one. If a
+build stops with *"Refusing to build an ISO…"*, the image export step failed — attach
+the build log (`scripts/*.log`, kept by running the workflow with `skip_cleanup: true`).
+
 
 ### 🪟 Local Account — Offline, Out of the Box
 
@@ -707,20 +738,27 @@ preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
 <summary><strong>"A media driver your computer needs is missing" (Ventoy)</strong></summary>
 
 **Problem**: Booting the built ISO from Ventoy stops at the very start of Setup with a
-missing media driver, while the same ISO installs fine when written with Rufus.
+missing media driver.
 
-**Cause**: Ventoy mounts the ISO as a virtual optical drive, so Setup reads
-`install.wim` through Ventoy's own UDF reader. ISOs built before this change used
-UDF 1.02, which cannot describe files larger than 4 GB. Rufus extracts the ISO
-instead, so it never hits that limit.
+**Cause (fixed)**: The wording is misleading — it is not a missing disk driver, it means
+Setup could not see its installation media. Ventoy boots the ISO's own `boot.wim` and
+injects `vtoyjump.exe` so it can mount the ISO as a virtual drive before `setup.exe`
+runs. Core was overwriting `HKLM\SYSTEM\Setup\CmdLine` inside `boot.wim` with a bare
+`X:\sources\setup.exe`, which stopped that injection from running. See **Booting a
+Tiny11 ISO from Ventoy** above for the full write-up.
 
-**Solutions:**
-1. **Rebuild the ISO** — the builders now use `-udfver150` (UDF 1.50)
-2. Format the Ventoy data partition as **NTFS** (exFAT is a documented cause of this error)
-3. Update Ventoy to **1.1.07 or newer**
-4. Make sure the ISO sits in the first, large Ventoy partition — not the 32 MB `VTOYEFI` one
+**Solution:** rebuild the ISO — fixed in commit
+[`8ae6bd9`](https://github.com/Sensei002/tiny11-automated/commit/8ae6bd9). Nothing about
+your Ventoy stick needs to change.
 
-**Workaround if you are stuck**: install from a PE environment (WinNTSetup, Dism++) instead of booting the ISO directly, and open an issue with the build log attached.
+**If a rebuilt ISO still fails**, check in this order:
+1. Ventoy **1.1.07 or newer**
+2. Data partition formatted **NTFS**, not exFAT
+3. The ISO sits in the first, large Ventoy partition — not the 32 MB `VTOYEFI` one
+4. Press `Shift+F10` at the error and read `X:\Windows\System32\ventoy\vtoype.log`
+
+**Workaround if you are stuck**: install from a PE environment (WinNTSetup, Dism++)
+instead of booting the ISO directly, and open an issue with the build log attached.
 
 </details>
 
