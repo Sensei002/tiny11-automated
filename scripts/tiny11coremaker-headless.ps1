@@ -595,12 +595,18 @@ function Patch-ReAgentXml {
 </WindowsRE>
 '@
 
-    try {
-        $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-        if (-not (Test-Path $recoveryDir)) {
-            New-Item -ItemType Directory -Force -Path $recoveryDir | Out-Null
-        }
+    # Only ever patch a ReAgent.xml that is already there. Creating the file (and
+    # its parent directory) inside boot.wim adds entries the stock image does not
+    # have, which is a gratuitous deviation from Microsoft's boot media - and the
+    # boot media is precisely what third-party boot managers such as Ventoy
+    # inspect and patch. The registry values set alongside this
+    # (SkipInstallingWinRE / DisableRecovery / WinREEnabled) already suppress WinRE.
+    if (-not (Test-Path -LiteralPath $reagentXmlPath)) {
+        Write-Log "No ReAgent.xml at $reagentXmlPath - nothing to patch"
+        return
+    }
 
+    try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($reagentXmlPath, $cleanXml.TrimStart(), $utf8NoBom)
         Write-Log "ReAgent.xml patched: all WinRE state/staging fields zeroed."
@@ -1185,7 +1191,22 @@ function Process-BootImage {
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Setup\Recovery' 'DisableRecovery' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSYSTEM\Setup' 'CmdLine' 'REG_SZ' 'X:\sources\setup.exe'
+
+    # NOTE: this build deliberately does NOT rewrite HKLM\SYSTEM\Setup\CmdLine.
+    #
+    # It used to be forced to a bare 'X:\sources\setup.exe'. That overwrite is the
+    # one boot-image change Standard does not make, and it lands squarely on the
+    # value a third-party boot manager has to hook in order to work:
+    #
+    #   Ventoy does not extract an ISO. It boots the ISO's own boot.wim and injects
+    #   vtoyjump.exe so that vtoyjump can mount the ISO as a virtual drive before
+    #   setup.exe runs. The injection targets the WinPE setup launch chain, i.e.
+    #   HKLM\SYSTEM\Setup\CmdLine / winpeshl. Leave the stock value alone and the
+    #   hook still matches; overwrite it with a value the patcher does not expect
+    #   and vtoyjump never runs, no virtual drive appears, and Windows Setup
+    #   reports "A media driver your computer needs is missing".
+    #
+    # The stock media launches Setup on its own, so nothing here needs to set it.
 
     # If winre.wim was removed from the OS image, patch ReAgent.xml in boot.wim as well
     # so SetupHost does not attempt to stage SafeOS from Install.esd during WinPE setup (bypasses error 0x80070003 at 11%)
@@ -1268,21 +1289,14 @@ function Create-TinyISO {
         $OSCDIMG = $localOSCDIMGPath
     }
 
-    # ---- Ventoy compatibility -------------------------------------------------
-    # -u2        ISO9660 + Joliet + UDF, exactly what Microsoft's own retail media
+    # ---- ISO container --------------------------------------------------------
+    # -u2        ISO9660 + Joliet + UDF, the layout Microsoft's own retail media
     #            uses. ISO9660 alone cannot hold a >4 GB file, so the UDF layer is
     #            what carries install.wim.
-    # -udfver150 UDF 1.50 instead of 1.02.
-    #
-    # UDF 1.02 cannot describe a file larger than 4 GB. A trimmed install.wim or
-    # install.esd is routinely bigger than that. oscdimg still writes the file, but
-    # the on-disc metadata ends up in a form that lenient readers (Windows' own UDF
-    # driver, which is what Rufus and Explorer use) accept and lean readers
-    # (Ventoy's virtual optical drive, which is what booting the ISO as a file
-    # relies on) mis-parse. The result is that Setup can no longer see the
-    # installation media and reports "A media driver your computer needs is
-    # missing". UDF 1.50 describes large files with proper 64-bit extents and is
-    # read correctly by both.
+    # -udfver150 UDF 1.50 rather than 1.02. UDF 1.02 cannot describe a single file
+    #            larger than 4 GB and a Standard install.wim can exceed that. This
+    #            is a robustness fix only - it is NOT what made Ventoy fail. See
+    #            "Booting a Tiny11 ISO from Ventoy" in README.md for that.
     # Build the ISO
     Write-Log "Building bootable ISO (this may take 5-10 minutes)..."
     & $OSCDIMG '-m' '-o' '-u2' '-udfver150' `

@@ -933,21 +933,14 @@ function Create-TinyISO {
         $OSCDIMG = $localOSCDIMGPath
     }
     
-    # ---- Ventoy compatibility -------------------------------------------------
-    # -u2        ISO9660 + Joliet + UDF, exactly what Microsoft's own retail media
+    # ---- ISO container --------------------------------------------------------
+    # -u2        ISO9660 + Joliet + UDF, the layout Microsoft's own retail media
     #            uses. ISO9660 alone cannot hold a >4 GB file, so the UDF layer is
     #            what carries install.wim.
-    # -udfver150 UDF 1.50 instead of 1.02.
-    #
-    # UDF 1.02 cannot describe a file larger than 4 GB. A trimmed install.wim or
-    # install.esd is routinely bigger than that. oscdimg still writes the file, but
-    # the on-disc metadata ends up in a form that lenient readers (Windows' own UDF
-    # driver, which is what Rufus and Explorer use) accept and lean readers
-    # (Ventoy's virtual optical drive, which is what booting the ISO as a file
-    # relies on) mis-parse. The result is that Setup can no longer see the
-    # installation media and reports "A media driver your computer needs is
-    # missing". UDF 1.50 describes large files with proper 64-bit extents and is
-    # read correctly by both.
+    # -udfver150 UDF 1.50 rather than 1.02. UDF 1.02 cannot describe a single file
+    #            larger than 4 GB and a Standard install.wim can exceed that. This
+    #            is a robustness fix only - it is NOT what made Ventoy fail. See
+    #            "Booting a Tiny11 ISO from Ventoy" in README.md for that.
     Write-Log "Building bootable ISO (this may take 5-10 minutes)..."
     & $OSCDIMG '-m' '-o' '-u2' '-udfver150' `
         "-bootdata:2#p0,e,b$tiny11Dir\boot\etfsboot.com#pEF,e,b$tiny11Dir\efi\microsoft\boot\efisys.bin" `
