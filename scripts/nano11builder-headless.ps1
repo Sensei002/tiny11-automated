@@ -1289,6 +1289,14 @@ function Dismount-AndExport {
     $tempWim = "$nano11Dir\sources\install2.wim"
     & Dism.exe /English /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:$INDEX /DestinationImageFile:$tempWim /Compress:max
 
+    # Never delete the source image if the export above failed. A failed export that
+    # still deletes install.wim leaves the ISO with no install image at all, and
+    # Windows Setup reports that as "A media driver your computer needs is missing"
+    # - which looks like a USB or driver fault and hides the real cause.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tempWim)) {
+        throw "DISM /Export-Image failed (exit code $LASTEXITCODE). Refusing to delete $wimFilePath."
+    }
+
     Remove-Item -Path $wimFilePath -Force
     Rename-Item -Path $tempWim -NewName "install.wim"
 
@@ -1370,6 +1378,12 @@ function Convert-ToESD {
     Write-Log "Converting to ESD format for maximum compression..."
     $esdPath = "$nano11Dir\sources\install.esd"
     & dism /Export-Image /SourceImageFile:$wimFilePath /SourceIndex:1 /DestinationImageFile:$esdPath /Compress:recovery
+    # Same guard as Dismount-AndExport: never delete the source WIM unless the ESD
+    # export actually succeeded.
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $esdPath)) {
+        throw "DISM /Export-Image to install.esd failed (exit code $LASTEXITCODE). Refusing to delete $wimFilePath."
+    }
+
     Remove-Item $wimFilePath -Force -ErrorAction SilentlyContinue
     Write-Log "ESD conversion complete"
 }
@@ -1393,12 +1407,31 @@ function Create-NanoISO {
     # booting the media. Write-IsoAnswerFile also pins the edition index into it.
     Write-IsoAnswerFile -Destination "$nano11Dir\autounattend.xml"
 
-    # Report the size of the install image. This is the file that drives the UDF
-    # version choice below, so it is worth having it in the build log.
-    foreach ($img in @("$nano11Dir\sources\install.wim", "$nano11Dir\sources\install.esd")) {
-        if (Test-Path $img) {
-            $imgGB = [math]::Round((Get-Item $img).Length / 1GB, 2)
-            Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgGB}GB"
+    # Guard: an ISO with no usable install image produces exactly the symptom
+    # "A media driver your computer needs is missing" when Setup looks for its media,
+    # which is easy to misread as a USB or driver fault. Fail the build here rather
+    # than shipping it.
+    $installImages = @("$nano11Dir\sources\install.wim", "$nano11Dir\sources\install.esd") |
+        Where-Object { Test-Path $_ }
+
+    if (-not $installImages) {
+        throw "No install.wim or install.esd in $nano11Dir\sources - the image export step failed. Refusing to build an ISO that Setup cannot install from."
+    }
+
+    foreach ($img in $installImages) {
+        $imgMB = [math]::Round((Get-Item $img).Length / 1MB, 1)
+        Write-Log "Install image $([System.IO.Path]::GetFileName($img)): ${imgMB}MB"
+        if ($imgMB -lt 500) {
+            throw "Install image $img is only ${imgMB}MB - it looks truncated. Refusing to build the ISO."
+        }
+    }
+
+    # A leftover export would confuse Setup's media detection.
+    foreach ($stray in @('install2.wim', 'install2.esd')) {
+        $strayPath = Join-Path "$nano11Dir\sources" $stray
+        if (Test-Path $strayPath) {
+            Write-Log "Removing leftover $stray from sources\" "WARN"
+            Remove-Item -Path $strayPath -Force -ErrorAction SilentlyContinue
         }
     }
 
