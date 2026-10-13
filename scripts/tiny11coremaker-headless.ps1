@@ -26,9 +26,23 @@
 .PARAMETER SkipCleanup
     Skip cleanup of temporary files after ISO creation (optional, for debugging)
 
+.PARAMETER RemoveDefender
+    Completely remove Windows Defender / Security so that no antimalware service
+    is present in the finished image (optional). Off by default - the standard
+    Core build only disables the Defender services.
+
+.PARAMETER AccountSetup
+    How the local account is set up on first boot (optional, default 'auto-admin'):
+      auto-admin - pre-create a local administrator called 'Admin', blank password,
+                   auto-logon on first boot, OOBE skipped entirely.
+      classic    - let OOBE run offline so the person installing creates their own
+                   local account with their own name. No Microsoft account.
+
 .EXAMPLE
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -SCRATCH D -SkipCleanup
+    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -RemoveDefender
+    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -AccountSetup classic
 
 .NOTES
     Original Author: ntdevlabs
@@ -62,7 +76,14 @@ param (
     [switch]$ENABLE_DOTNET35,
 
     [Parameter(Mandatory=$false, HelpMessage="Preserve winre.wim instead of replacing it with an empty stub. Use this if targeting real hardware or 24H2/25H2 setups to avoid error 0x8007000B.")]
-    [switch]$PreserveWinRE
+    [switch]$PreserveWinRE,
+
+    [Parameter(Mandatory=$false, HelpMessage="Completely remove Windows Defender / Security so no antimalware service is present in the finished image. Off by default - the standard Core build only disables the Defender services.")]
+    [switch]$RemoveDefender,
+
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
+    [ValidateSet('auto-admin', 'classic')]
+    [string]$AccountSetup = 'auto-admin'
 )
 
 #---------[ Error Handling ]---------
@@ -112,7 +133,10 @@ function Write-IsoAnswerFile {
     # local-account automation silently stops working.
     param(
         [Parameter(Mandatory=$true)][string]$Destination,
-        [Parameter(Mandatory=$false)][string]$Template
+        [Parameter(Mandatory=$false)][string]$Template,
+        [Parameter(Mandatory=$false)]
+        [ValidateSet('auto-admin', 'classic')]
+        [string]$AccountMode = 'auto-admin'
     )
 
     if (-not $Template) {
@@ -135,6 +159,24 @@ function Write-IsoAnswerFile {
             ('${1}' + $INDEX + '${2}')
         )
 
+        # Account mode 'classic': drop the pre-created account, the auto-logon and
+        # the first-logon cleanup so Windows Setup runs OOBE and the person
+        # installing creates their own local account with their own name.
+        #
+        # Everything else in the template is kept, so the install stays fully
+        # offline: DynamicUpdate stays off, the online-account screens stay hidden
+        # and BypassNRO / DisableOnline stay set. The result is the classic
+        # "create a local account" OOBE with no Microsoft account and no network.
+        #
+        # These three elements never nest inside an element of the same name in
+        # the template, so a non-greedy block match is unambiguous. The result is
+        # re-parsed as XML below, so a bad edit here fails the build loudly.
+        if ($AccountMode -eq 'classic') {
+            $content = [regex]::Replace($content, '(?s)\s*<UserAccounts>.*?</UserAccounts>', '')
+            $content = [regex]::Replace($content, '(?s)\s*<AutoLogon>.*?</AutoLogon>', '')
+            $content = [regex]::Replace($content, '(?s)\s*<FirstLogonCommands>.*?</FirstLogonCommands>', '')
+        }
+
         # Throws if the template is not well-formed XML - we want that to be loud.
         $null = [xml]$content
 
@@ -147,7 +189,7 @@ function Write-IsoAnswerFile {
         $utf8NoBom = New-Object System.Text.UTF8Encoding $false
         [System.IO.File]::WriteAllText($Destination, $content, $utf8NoBom)
 
-        Write-Log "Wrote unattended answer file to $Destination (IMAGE/INDEX = $INDEX)"
+        Write-Log "Wrote unattended answer file to $Destination (IMAGE/INDEX = $INDEX, account mode = $AccountMode)"
     } catch {
         Write-Log "Failed to write answer file to ${Destination}: $_" "ERROR"
         throw
@@ -479,6 +521,135 @@ function Remove-SystemPackages {
     }
 
     Write-Log "Removed $removeCount system packages"
+}
+
+function Remove-DefenderPayload {
+    # -RemoveDefender only. Strips the Defender / Security payload out of the
+    # mounted image: the Defender feature package, the Windows Security app, the
+    # on-disk Defender program + definition store and the Security Health
+    # binaries.
+    #
+    # This runs while the image is mounted but BEFORE its registry hives are
+    # loaded: DISM /Remove-Package needs exclusive access to the component store,
+    # which 'reg load' would otherwise lock.
+    #
+    # Every step is best-effort and logged. A partial removal still yields a
+    # working image - it just leaves a Defender component behind - so a failure
+    # here must not abort the whole build.
+    Write-Log "Removing Windows Defender / Security payload (RemoveDefender)..." "INFO"
+
+    # 1) Defender feature package(s).
+    $allPackages = & dism /English /image:$scratchDir /Get-Packages
+    $defenderPackages = $allPackages |
+        ForEach-Object { if ($_ -match 'Package Identity\s*:\s*(.+?)\s*$') { $Matches[1] } } |
+        Where-Object { $_ -match 'Windows-Defender-Client-Package|Windows-Defender-Client-WOW64-Package|Windows-Defender-Client-En-US-Package|Microsoft-Windows-SenseClient' } |
+        Select-Object -Unique
+
+    if ($defenderPackages) {
+        foreach ($identity in $defenderPackages) {
+            Write-Log "Removing Defender package: $identity"
+            & dism /English /image:$scratchDir /Remove-Package /PackageName:$identity /Quiet /NoRestart | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "DISM could not remove $identity (exit $LASTEXITCODE) - continuing" "WARN"
+            }
+        }
+    } else {
+        Write-Log "No Defender feature package found in the image" "WARN"
+    }
+
+    # 2) The Windows Security app (SecHealthUI).
+    $securityApps = & dism /English /image:$scratchDir /Get-ProvisionedAppxPackages |
+        ForEach-Object { if ($_ -match 'PackageName : (.*)') { $Matches[1] } } |
+        Where-Object { $_ -like '*SecHealthUI*' }
+    foreach ($app in $securityApps) {
+        Write-Log "Removing Windows Security app: $app"
+        & dism /English /image:$scratchDir /Remove-ProvisionedAppxPackage "/PackageName:$app" | Out-Null
+    }
+
+    # 3) On-disk Defender program + definition store.
+    $defenderPaths = @(
+        "$scratchDir\Program Files\Windows Defender",
+        "$scratchDir\Program Files (x86)\Windows Defender",
+        "$scratchDir\ProgramData\Microsoft\Windows Defender",
+        "$scratchDir\ProgramData\Microsoft\Windows Defender Advanced Threat Protection"
+    )
+    foreach ($path in $defenderPaths) {
+        if (Test-Path $path) {
+            Write-Log "Deleting Defender data: $path"
+            & takeown /f $path /r /a | Out-Null
+            & icacls $path /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # 4) Security Health binaries (the tray agent behind the "Windows Security"
+    #    shield in the notification area).
+    $securityHealthBinaries = Get-ChildItem -Path "$scratchDir\Windows\System32" -Filter "SecurityHealth*" -File -ErrorAction SilentlyContinue
+    foreach ($binary in $securityHealthBinaries) {
+        Write-Log "Deleting Security Health binary: $($binary.Name)"
+        & takeown /f $binary.FullName /a | Out-Null
+        & icacls $binary.FullName /grant "$($adminGroup.Value):(F)" /C | Out-Null
+        Remove-Item -Path $binary.FullName -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Log "Defender / Security payload removal finished"
+}
+
+function Remove-DefenderRegistry {
+    # -RemoveDefender only. Registry half of the removal, so it must run AFTER
+    # Load-RegistryHives.
+    #
+    # The Defender service keys are deleted outright rather than set to Start=4.
+    # Merely disabling WinDefend leaves the service defined, so the "Antimalware
+    # Service Executable" (MsMpEng.exe) can still be re-armed; deleting the key is
+    # what makes the antimalware service genuinely absent from the finished image.
+    Write-Log "Removing Defender / Security registry keys (RemoveDefender)..." "INFO"
+
+    # Services that make up Defender and the Windows Security platform.
+    $defenderServices = @(
+        'WinDefend',             # Microsoft Defender Antivirus Service (MsMpEng.exe)
+        'WdNisSvc',              # Network Inspection Service
+        'WdNisDrv',              # Network Inspection driver
+        'WdFilter',              # Defender file-system mini-filter
+        'WdDevFlt',              # Defender device filter
+        'WdBoot',                # Defender boot driver
+        'Sense',                 # Defender for Endpoint / EDR
+        'SecurityHealthService'  # Windows Security Center host
+    )
+    foreach ($service in $defenderServices) {
+        $serviceKey = "HKLM:\zSYSTEM\ControlSet001\Services\$service"
+        if (Test-Path $serviceKey) {
+            Remove-Item -Path $serviceKey -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $serviceKey) {
+                Write-Log "Could not delete Defender service key (locked or access denied): $service" "WARN"
+            } else {
+                Write-Log "Deleted Defender service key: $service"
+            }
+        } else {
+            Write-Log "Defender service key not present: $service"
+        }
+    }
+
+    # Security Center and System Guard Runtime Monitor are shared Windows
+    # components rather than Defender itself, so they are disabled rather than
+    # deleted - removing their keys outright risks breaking unrelated plumbing.
+    foreach ($service in @('wscsvc', 'SgrmAgent', 'SgrmBroker', 'MsSecFlt')) {
+        Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$service" 'Start' 'REG_DWORD' '4'
+    }
+
+    # Defender configuration + policy hives.
+    foreach ($key in @('HKLM:\zSOFTWARE\Microsoft\Windows Defender', 'HKLM:\zSOFTWARE\Policies\Microsoft\Windows Defender')) {
+        if (Test-Path $key) {
+            Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $key) {
+                Write-Log "Could not delete Defender registry key (locked or access denied): $key" "WARN"
+            } else {
+                Write-Log "Deleted Defender registry key: $key"
+            }
+        }
+    }
+
+    Write-Log "Defender / Security registry removal finished"
 }
 
 function Remove-EdgeAndOneDrive {
@@ -831,7 +1002,7 @@ function Apply-RegistryTweaks {
 
     # Bake the answer file into the image too, so a later sysprep /generalize keeps
     # the same OOBE behaviour.
-    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -AccountMode $AccountSetup
 
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
@@ -878,7 +1049,7 @@ function Apply-RegistryTweaks {
 
     # Bake the answer file into the image too, so a later sysprep /generalize keeps
     # the same OOBE behaviour.
-    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -AccountMode $AccountSetup
 
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
@@ -1259,7 +1430,7 @@ function Create-TinyISO {
 
     # The answer file at the ISO root is the one Windows Setup auto-detects when
     # booting the media. Write-IsoAnswerFile also pins the edition index into it.
-    Write-IsoAnswerFile -Destination "$tiny11Dir\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$tiny11Dir\autounattend.xml" -AccountMode $AccountSetup
 
     # Guard: an ISO with no usable install image produces exactly the symptom
     # "A media driver your computer needs is missing" when Setup looks for its media,
@@ -1397,7 +1568,7 @@ function Invoke-Cleanup {
 try {
     Write-Log "=== Tiny11 Core Headless Builder Started ===" "INFO"
     Write-Log "Author: kelexine (https://github.com/kelexine)"
-    Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk"
+    Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk, AccountSetup=$AccountSetup, RemoveDefender=$RemoveDefender"
     Write-Log "WARNING: This creates a minimal Windows 11 Core image - NOT for daily use!"
 
     Test-Prerequisites
@@ -1424,6 +1595,13 @@ try {
     Remove-BloatwareApps
     Remove-SystemPackages
 
+    # Defender / Security removal (opt-in via -RemoveDefender). The payload half
+    # runs here, while the image hives are still unloaded; the registry half runs
+    # later, right after Load-RegistryHives.
+    if ($RemoveDefender) {
+        Remove-DefenderPayload
+    }
+
     # .NET 3.5 installation (optional, Core-only)
     if ($ENABLE_DOTNET35) {
         Write-Log "Enabling .NET 3.5..." "INFO"
@@ -1446,6 +1624,9 @@ try {
 
     Load-RegistryHives
     Apply-RegistryTweaks
+    if ($RemoveDefender) {
+        Remove-DefenderRegistry
+    }
     Apply-PerformanceTweaks
     Remove-ScheduledTasks
     Remove-NonEssentialServices

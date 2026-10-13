@@ -49,6 +49,19 @@ on:
         type: boolean
         required: false
         default: false
+      remove_defender:
+        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image'
+        type: boolean
+        required: false
+        default: false
+      account_setup:
+        description: 'Local account setup. "auto-admin" = automatically create the local account "Admin" (OOBE skipped). "classic" = you create your own local account with your name during setup.'
+        type: choice
+        required: false
+        default: 'auto-admin'
+        options:
+          - 'auto-admin'
+          - 'classic'
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -325,17 +338,31 @@ jobs:
           $preserveWinRE = [System.Boolean]::Parse("${{ github.event.inputs.preserve_winre }}")
           Write-Output "Preserve WinRE: $preserveWinRE"
 
+          # Compare against the literal string so an omitted input (e.g. a
+          # dispatch from the version-matrix-builder automation, which does not
+          # send this key) degrades to $false instead of throwing.
+          $removeDefender = ("${{ github.event.inputs.remove_defender }}" -eq "true")
+          Write-Output "Remove Defender: $removeDefender"
+
+          # Only fall back to the default when nothing was supplied, so the
+          # builder's ValidateSet never receives an empty string.
+          $accountSetup = "${{ github.event.inputs.account_setup }}"
+          if ([string]::IsNullOrWhiteSpace($accountSetup)) { $accountSetup = 'auto-admin' }
+          Write-Output "Account setup: $accountSetup"
+
           Write-Output "=== Starting Tiny11 Core Builder ==="
           Write-Output "ISO Drive: $($params.ISO)"
           Write-Output "Image Index: $($params.INDEX)"
           Write-Output ".NET 3.5: $enableDotNet"
           Write-Output "Preserve WinRE: $preserveWinRE"
+          Write-Output "Remove Defender: $removeDefender"
+          Write-Output "Account setup: $accountSetup"
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Output "WARNING: This is a CORE build with aggressive optimization!"
 
           $startTime = Get-Date
 
-          .\scripts\tiny11coremaker-headless.ps1 @params -ENABLE_DOTNET35:$enableDotNet -PreserveWinRE:$preserveWinRE
+          .\scripts\tiny11coremaker-headless.ps1 @params -ENABLE_DOTNET35:$enableDotNet -PreserveWinRE:$preserveWinRE -RemoveDefender:$removeDefender -AccountSetup $accountSetup
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Core build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"

@@ -39,6 +39,14 @@ on:
         required: false
         default: false
         type: boolean
+      account_setup:
+        description: 'Local account setup. "auto-admin" = automatically create the local account "Admin" (OOBE skipped). "classic" = you create your own local account with your name during setup.'
+        type: choice
+        required: false
+        default: 'auto-admin'
+        options:
+          - 'auto-admin'
+          - 'classic'
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -258,15 +266,22 @@ jobs:
             $params.SkipCleanup = $true
             Write-Output "Cleanup will be skipped (debugging mode)"
           }
+
+          # Only fall back to the default when nothing was supplied, so the
+          # builder's ValidateSet never receives an empty string.
+          $accountSetup = "${{ github.event.inputs.account_setup }}"
+          if ([string]::IsNullOrWhiteSpace($accountSetup)) { $accountSetup = 'auto-admin' }
+          Write-Output "Account setup: $accountSetup"
           
           Write-Output "=== Starting Tiny11 Builder ==="
           Write-Output "ISO Drive: $($params.ISO)"
           Write-Output "Image Index: $($params.INDEX)"
+          Write-Output "Account setup: $accountSetup"
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           
           $startTime = Get-Date
           
-          .\scripts\tiny11maker-headless.ps1 @params
+          .\scripts\tiny11maker-headless.ps1 @params -AccountSetup $accountSetup
           
           $buildTime = (Get-Date) - $startTime
           Write-Output "Build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
