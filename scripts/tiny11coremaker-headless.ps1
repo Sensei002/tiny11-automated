@@ -38,11 +38,46 @@
       classic    - let OOBE run offline so the person installing creates their own
                    local account with their own name. No Microsoft account.
 
+.PARAMETER GamingProfile
+    Apply the Tiny11 Core-Gaming profile (optional). Layers a latency-first,
+    AtlasOS-style tweak set on top of the Core performance profile: a custom power
+    scheme (no CPU idle, no core parking, no USB/PCIe power saving), Game Mode off,
+    Fullscreen Optimizations off, MPO off, mouse acceleration off, VBS / HVCI /
+    Credential Guard and Spectre-Meltdown mitigations off, Xbox and Gaming Services
+    removed, Windows Search / Bluetooth / printing disabled, and game runtimes
+    (VC++ / DirectX 9.0c / .NET Desktop) bundled for install at first boot.
+
+    Every tweak is defined in config/gaming_profile.json and can be toggled per
+    group with -GamingGroups. See GAMING.md for the full list and the risks.
+
+.PARAMETER GamingProfileFile
+    Path to the gaming profile JSON (optional). Defaults to
+    config/gaming_profile.json in the repository root.
+
+.PARAMETER GamingGroups
+    Hashtable of per-group on/off overrides (optional), e.g.
+    @{ disable_mpo = $false; install_game_runtimes = $false }.
+    Groups not listed keep the defaults from the profile JSON.
+
+.PARAMETER HagsMode
+    Hardware Accelerated GPU Scheduling: 'on' (default) forces it on, 'off' forces
+    it off, 'leave' keeps the Core default untouched. AtlasOS treats HAGS as
+    system-dependent, so it is a toggle here rather than a fixed choice.
+
 .EXAMPLE
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -SCRATCH D -SkipCleanup
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -RemoveDefender
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -AccountSetup classic
+
+.EXAMPLE
+    # Full Core-Gaming build for competitive esports
+    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender -PreserveWinRE
+
+.EXAMPLE
+    # Core-Gaming with a few groups dialled back
+    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
+        -GamingGroups @{ disable_security_mitigations = $false; install_game_runtimes = $false }
 
 .NOTES
     Original Author: ntdevlabs
@@ -83,7 +118,20 @@ param (
 
     [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
-    [string]$AccountSetup = 'auto-admin'
+    [string]$AccountSetup = 'auto-admin',
+
+    [Parameter(Mandatory=$false, HelpMessage="Apply the Tiny11 Core-Gaming profile: AtlasOS-style power scheme, latency-first tweaks, security mitigations off. Layers on top of the Core performance profile. See GAMING.md.")]
+    [switch]$GamingProfile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Path to the gaming profile JSON. Defaults to config/gaming_profile.json in the repository root.")]
+    [string]$GamingProfileFile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Hashtable of per-group on/off overrides, e.g. @{ disable_mpo = `$false }. Groups not listed use the profile defaults.")]
+    [hashtable]$GamingGroups,
+
+    [Parameter(Mandatory=$false, HelpMessage="Hardware Accelerated GPU Scheduling: 'on' forces it on, 'off' forces it off, 'leave' keeps the Core default.")]
+    [ValidateSet('on', 'off', 'leave')]
+    [string]$HagsMode = 'on'
 )
 
 #---------[ Error Handling ]---------
@@ -103,6 +151,21 @@ $scratchDir = "$ScratchDisk\scratchdir"
 $tiny11Dir = "$ScratchDisk\tiny11"
 $outputISO = "$PSScriptRoot\tiny11-core.iso"
 $logFile = "$PSScriptRoot\tiny11-core_$(Get-Date -Format yyyyMMdd_HHmmss).log"
+
+#---------[ Gaming profile (optional) ]---------
+# The profile engine is data-driven from config/gaming_profile.json and is dot-sourced
+# only when -GamingProfile is set, so a plain Core build is completely unaffected.
+$gamingProfileData = $null
+$gamingGroupFlags = $null
+$gamingConfigDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'config'
+
+if ($GamingProfile) {
+    $gamingModule = Join-Path $PSScriptRoot 'gaming-profile.ps1'
+    if (-not (Test-Path -LiteralPath $gamingModule)) {
+        throw "Gaming profile requested but the engine was not found at $gamingModule"
+    }
+    . $gamingModule
+}
 
 # Initialize admin identifiers for permission operations
 try {
@@ -1569,7 +1632,26 @@ try {
     Write-Log "=== Tiny11 Core Headless Builder Started ===" "INFO"
     Write-Log "Author: kelexine (https://github.com/kelexine)"
     Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk, AccountSetup=$AccountSetup, RemoveDefender=$RemoveDefender"
+    if ($GamingProfile) { Write-Log "Gaming profile: ENABLED (HagsMode=$HagsMode)" }
     Write-Log "WARNING: This creates a minimal Windows 11 Core image - NOT for daily use!"
+
+    if ($GamingProfile) {
+        Initialize-GamingModule -LogFile $logFile -ProfileDirectory $gamingConfigDir
+        $gamingProfileData = Import-GamingProfile -Path $GamingProfileFile
+        $gamingGroupFlags = Resolve-GamingGroups -Profile $gamingProfileData -Overrides $GamingGroups
+
+        $onGroups = @()
+        $offGroups = @()
+        foreach ($name in ($gamingGroupFlags.Keys | Sort-Object)) {
+            if ($gamingGroupFlags[$name]) { $onGroups += $name } else { $offGroups += $name }
+        }
+        Write-Log "Gaming groups ON : $($onGroups -join ', ')"
+        if ($offGroups.Count -gt 0) {
+            Write-Log "Gaming groups OFF: $($offGroups -join ', ')"
+        } else {
+            Write-Log "Gaming groups OFF: (none)"
+        }
+    }
 
     Test-Prerequisites
     Initialize-Directories
@@ -1594,6 +1676,14 @@ try {
     # Customization phase
     Remove-BloatwareApps
     Remove-SystemPackages
+
+    # Gaming profile: image-level removals. These run while the image hives are still
+    # unloaded, because DISM package/feature operations must not race with a mounted hive.
+    if ($GamingProfile) {
+        Invoke-GamingAppxRemoval            -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
+        Invoke-GamingSystemPackageRemoval   -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
+        Invoke-GamingOptionalFeatureRemoval -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
+    }
 
     # Defender / Security removal (opt-in via -RemoveDefender). The payload half
     # runs here, while the image hives are still unloaded; the registry half runs
@@ -1628,12 +1718,33 @@ try {
         Remove-DefenderRegistry
     }
     Apply-PerformanceTweaks
+
+    # Gaming profile must run AFTER Apply-PerformanceTweaks so it can deliberately
+    # override the Core defaults (Game Mode on -> off, SystemResponsiveness 0 -> 10).
+    if ($GamingProfile) {
+        Invoke-GamingRegistryTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
+        Set-GamingHagsMode -Profile $gamingProfileData -HagsMode $HagsMode
+    }
+
     Remove-ScheduledTasks
     Remove-NonEssentialServices
+
+    if ($GamingProfile) {
+        Invoke-GamingServiceTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
+    }
+
     Unload-RegistryHives
 
     # WinSxS optimization (CORE-specific)
     Optimize-WinSxS
+
+    # Gaming profile: stage the first-boot payload into the mounted image. This MUST
+    # happen before Dismount-AndExport so the files land inside install.wim.
+    # Only install.wim is touched - never boot.wim, which Ventoy inspects and patches.
+    if ($GamingProfile) {
+        New-GamingFirstBootPayload -Profile $gamingProfileData -Groups $gamingGroupFlags `
+            -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -HagsMode $HagsMode
+    }
 
     # Finalization phase
     Optimize-WindowsImage
@@ -1645,6 +1756,12 @@ try {
 
     Create-TinyISO
     Write-BuildInfo -OutputPath "$PSScriptRoot\tiny11core-buildinfo.json"
+
+    if ($GamingProfile) {
+        Write-GamingBuildInfo -Profile $gamingProfileData -Groups $gamingGroupFlags `
+            -OutputPath "$PSScriptRoot\tiny11core-gaming-buildinfo.json" `
+            -HagsMode $HagsMode -WindowsBuild $script:DetectedBuildNumber
+    }
 
     # Cleanup
     Invoke-Cleanup

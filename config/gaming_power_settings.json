@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "1.0.0",
+  "title": "Tiny11 Core-Gaming power scheme",
+  "description": "AtlasOS-style latency-first power scheme. Applied at first boot by gaming-firstboot.ps1. Deliberately NOT the built-in Ultimate Performance scheme - it is a new scheme derived from the High performance template with explicit Atlas-style overrides.",
+  "schemeName": "Tiny11 Core-Gaming",
+  "schemeDescription": "Latency-first scheme (AtlasOS-style): no CPU idle, no parking, no USB/PCIe power saving.",
+  "baseTemplate": {
+    "guid": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+    "name": "High performance",
+    "fallbacks": [
+      { "guid": "e9a42b02-d5df-448d-aa00-03f14749eb61", "name": "Ultimate Performance" },
+      { "guid": "381b4222-f694-41f0-9685-ff5bb260df2e", "name": "Balanced" }
+    ]
+  },
+  "settings": [
+    {
+      "name": "Processor idle disable",
+      "subgroup": "SUB_PROCESSOR",
+      "setting": "5d76a2ca-e8c0-402f-a133-2158492d58ad",
+      "ac": 1,
+      "dc": 1,
+      "group": "disable_cpu_idle",
+      "hidden": false,
+      "note": "1 = no idle. Forces C-State 0 so the CPU never pays a C-State wake penalty. AtlasOS's core latency setting."
+    },
+    {
+      "name": "Minimum processor state",
+      "subgroup": "SUB_PROCESSOR",
+      "setting": "893dee8e-2bef-41e0-89c6-b55d0929964c",
+      "ac": 100,
+      "dc": 100,
+      "note": "Never downclock - avoids clock ramp lag on a frame spike."
+    },
+    {
+      "name": "Maximum processor state",
+      "subgroup": "SUB_PROCESSOR",
+      "setting": "bc5038f7-23e0-4960-96da-33abaf5935ec",
+      "ac": 100,
+      "dc": 100
+    },
+    {
+      "name": "Processor performance boost mode",
+      "subgroup": "SUB_PROCESSOR",
+      "setting": "be337238-0d82-4146-a960-4f3749d470c7",
+      "ac": 2,
+      "dc": 2,
+      "hidden": true,
+      "note": "2 = Aggressive. Hidden by default; the script unhides it before setting."
+    },
+    {
+      "name": "Processor performance time check interval",
+      "subgroup": "SUB_PROCESSOR",
+      "setting": "4b92d758-5a24-4851-a470-815d78aee119",
+      "ac": 15,
+      "dc": 15,
+      "note": "Shorter interval = faster response to load changes."
+    },
+    {
+      "name": "Processor performance core parking min cores",
+      "subgroup": "SUB_PROCESSOR",
+      "setting": "0cc5b647-c1df-4637-891a-dec35c318583",
+      "ac": 100,
+      "dc": 100,
+      "note": "100 = no core parking."
+    },
+    {
+      "name": "Hard disk turn off",
+      "subgroup": "SUB_DISK",
+      "setting": "6738e2c4-e8a5-4a42-b16a-e040e769756e",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = never. No spin-down / idle latency."
+    },
+    {
+      "name": "Sleep after",
+      "subgroup": "SUB_SLEEP",
+      "setting": "29f6c1db-86da-48c5-9fdb-f2b67b1f44da",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = never."
+    },
+    {
+      "name": "Display off after",
+      "subgroup": "SUB_VIDEO",
+      "setting": "3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = never."
+    },
+    {
+      "name": "USB selective suspend",
+      "subgroup": "SUB_USB",
+      "setting": "48e6b7a6-50f5-4782-a5d4-53bb8f07e226",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = disabled. Keeps mouse / keyboard / controller polling constant."
+    },
+    {
+      "name": "PCI Express ASPM",
+      "subgroup": "SUB_PCIEXPRESS",
+      "setting": "ee12f906-d277-404b-b6da-e5fa1a576df5",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = off. Removes PCIe link power-state transition latency for the GPU."
+    },
+    {
+      "name": "Wireless adapter power saving mode",
+      "subgroup": "SUB_WIFI",
+      "setting": "12bbebe6-58d6-4636-95bb-3217ef867c1a",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = maximum performance."
+    },
+    {
+      "name": "Energy saver policy",
+      "subgroup": "SUB_ENERGYSAVER",
+      "setting": "e69653ca-cf7f-4f05-aa73-cb833fa90ad4",
+      "ac": 0,
+      "dc": 0,
+      "note": "0 = off."
+    }
+  ],
+  "bcd": [
+    { "args": "/set hypervisorlaunchtype off", "note": "Required for the VBS/HVCI-off path; also removes Hyper-V scheduler overhead." },
+    { "args": "/set useplatformclock false", "note": "Prefer the invariant TSC over the platform clock." },
+    { "args": "/set disabledynamictick yes", "note": "Keep the system timer running at a constant rate." },
+    { "args": "/set useplatformtick yes", "note": "Use the platform tick source." },
+    { "args": "/set timeout 5", "note": "Short boot menu." },
+    { "args": "/set nx OptIn", "note": "Keep DEP enabled - this is not a security downgrade." }
+  ]
+}

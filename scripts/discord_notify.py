@@ -364,6 +364,8 @@ def _build_extra_fields(data: Dict) -> Optional[List[Dict]]:
       - windows_build   → 'Build' field (real detected Windows build number)
       - preserve_winre  → 'WinRE' field (Core / Nano builds)
       - enable_dotnet35 → '.NET 3.5' field (Core builds)
+      - gaming_profile  → 'Gaming profile' field (Core-Gaming builds)
+      - hags_mode       → 'HAGS' field (Core-Gaming builds)
 
     Unknown keys are silently ignored so future callers can extend the payload
     without touching this function.
@@ -390,6 +392,20 @@ def _build_extra_fields(data: Dict) -> Optional[List[Dict]]:
         fields.append({
             'name': '.NET 3.5',
             'value': '✅ Enabled' if val == 'true' else '❌ Disabled',
+            'inline': True
+        })
+
+    if 'gaming_profile' in data and data['gaming_profile']:
+        fields.append({
+            'name': 'Gaming profile',
+            'value': str(data['gaming_profile']),
+            'inline': True
+        })
+
+    if 'hags_mode' in data and data['hags_mode']:
+        fields.append({
+            'name': 'HAGS',
+            'value': str(data['hags_mode']),
             'inline': True
         })
 
@@ -432,7 +448,7 @@ def main():
 
     # Coerce known embed fields to strings so Discord doesn't 400 on numeric values
     if isinstance(data, dict):
-        for k in ('version', 'build_type', 'edition', 'duration', 'iso_size', 'error', 'logs_url', 'windows_build'):
+        for k in ('version', 'build_type', 'edition', 'duration', 'iso_size', 'error', 'logs_url', 'windows_build', 'gaming_profile', 'hags_mode'):
             if k in data and data[k] is not None:
                 data[k] = str(data[k])
 

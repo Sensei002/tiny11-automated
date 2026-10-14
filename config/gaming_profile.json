@@ -1,0 +1,528 @@
+{
+  "schemaVersion": "1.0.0",
+  "profile": "core-gaming",
+  "title": "Tiny11 Core-Gaming",
+  "description": "Latency-first, AtlasOS-style profile for competitive esports on older hardware. Layers on top of the Tiny11 Core aggressive performance profile.",
+  "hivePrefixes": {
+    "SYSTEM": "HKLM\\zSYSTEM",
+    "SOFTWARE": "HKLM\\zSOFTWARE",
+    "DEFAULT": "HKLM\\zDEFAULT",
+    "NTUSER": "HKLM\\zNTUSER"
+  },
+  "defaultGroups": {
+    "atlas_power_scheme": true,
+    "disable_cpu_idle": true,
+    "disable_security_mitigations": true,
+    "remove_xbox_gaming_stack": true,
+    "strip_background_noise": true,
+    "disable_fast_startup": true,
+    "network_latency_tweaks": true,
+    "disable_mpo": true,
+    "latency_input_tweaks": true,
+    "disable_fso": true,
+    "disable_game_mode": true,
+    "disable_printing": true,
+    "install_game_runtimes": true
+  },
+  "groupDescriptions": {
+    "atlas_power_scheme": "Custom AtlasOS-style power scheme, imported and activated at first boot.",
+    "disable_cpu_idle": "Force CPU to C-State 0 (no idle) to remove C-State wake latency.",
+    "disable_security_mitigations": "Turn off VBS, HVCI, Credential Guard, System Guard and Spectre/Meltdown mitigations.",
+    "remove_xbox_gaming_stack": "Remove Xbox Live / Gaming Services stack and Xbox AppX packages.",
+    "strip_background_noise": "Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics.",
+    "disable_fast_startup": "Disable hibernation and Fast Startup (Hiberboot).",
+    "network_latency_tweaks": "Disable Nagle, QoS reserved bandwidth, Delivery Optimization P2P and WU auto-reboot.",
+    "disable_mpo": "Disable Multi-Plane Overlay to remove flicker / micro-stutter on some GPUs.",
+    "latency_input_tweaks": "Disable mouse acceleration, accessibility hotkeys and USB/GPU latency contributors.",
+    "disable_fso": "Force true fullscreen exclusive instead of Fullscreen Optimizations.",
+    "disable_game_mode": "Disable Windows Game Mode (AtlasOS default).",
+    "disable_printing": "Disable print spooler services and remove the printing optional features.",
+    "install_game_runtimes": "Bundle and silently install VC++ 2005-2022, DirectX 9.0c and .NET Desktop Runtime at first boot."
+  },
+  "registry": [
+    {
+      "group": "disable_game_mode",
+      "hive": "NTUSER",
+      "path": "SOFTWARE\\Microsoft\\GameBar",
+      "name": "AllowAutoGameMode",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "AtlasOS ships Game Mode off - its useful work is already done by disabling WU/telemetry/background apps."
+    },
+    {
+      "group": "disable_game_mode",
+      "hive": "NTUSER",
+      "path": "SOFTWARE\\Microsoft\\GameBar",
+      "name": "AutoGameModeEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_game_mode",
+      "hive": "NTUSER",
+      "path": "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\GameDVR",
+      "name": "AppCaptureEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_game_mode",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\GameDVR",
+      "name": "AllowGameDVR",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_fso",
+      "hive": "NTUSER",
+      "path": "System\\GameConfigStore",
+      "name": "GameDVR_FSEBehavior",
+      "type": "REG_DWORD",
+      "value": "2",
+      "note": "2 = force fullscreen exclusive, bypassing Fullscreen Optimizations."
+    },
+    {
+      "group": "disable_fso",
+      "hive": "NTUSER",
+      "path": "System\\GameConfigStore",
+      "name": "GameDVR_FSEBehaviorMode",
+      "type": "REG_DWORD",
+      "value": "2"
+    },
+    {
+      "group": "disable_fso",
+      "hive": "NTUSER",
+      "path": "System\\GameConfigStore",
+      "name": "GameDVR_HonorUserFSEBehaviorMode",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "group": "disable_fso",
+      "hive": "NTUSER",
+      "path": "System\\GameConfigStore",
+      "name": "GameDVR_DXGIHonorFSEWindowsCompatible",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "group": "disable_fso",
+      "hive": "NTUSER",
+      "path": "System\\GameConfigStore",
+      "name": "GameDVR_EFSEBehaviorMode",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\DeviceGuard",
+      "name": "EnableVirtualizationBasedSecurity",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Largest remaining FPS lever on CPU-bound titles. Removes a kernel exploit mitigation."
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\DeviceGuard",
+      "name": "RequirePlatformSecurityFeatures",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+      "name": "Enabled",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Memory Integrity / HVCI."
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\DeviceGuard\\Scenarios\\CredentialGuard",
+      "name": "Enabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\DeviceGuard\\Scenarios\\SystemGuard",
+      "name": "Enabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DeviceGuard",
+      "name": "EnableVirtualizationBasedSecurity",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DeviceGuard",
+      "name": "LsaCfgFlags",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DeviceGuard",
+      "name": "HypervisorEnforcedCodeIntegrity",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Session Manager\\Memory Management",
+      "name": "FeatureSettingsOverride",
+      "type": "REG_DWORD",
+      "value": "3",
+      "note": "3 = disable Spectre/Meltdown kernel mitigations."
+    },
+    {
+      "group": "disable_security_mitigations",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Session Manager\\Memory Management",
+      "name": "FeatureSettingsOverrideMask",
+      "type": "REG_DWORD",
+      "value": "3"
+    },
+    {
+      "group": "atlas_power_scheme",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Power\\PowerThrottling",
+      "name": "PowerThrottlingOff",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "group": "atlas_power_scheme",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Power",
+      "name": "HibernateEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "atlas_power_scheme",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Power",
+      "name": "HibernateEnabledDefault",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "atlas_power_scheme",
+      "hive": "SOFTWARE",
+      "path": "Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile",
+      "name": "SystemResponsiveness",
+      "type": "REG_DWORD",
+      "value": "10",
+      "note": "AtlasOS value. Tiny11 Core ships 0; 10 leaves a small CPU reserve for the rest of the system."
+    },
+    {
+      "group": "disable_fast_startup",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Session Manager\\Power",
+      "name": "HiberbootEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "disable_mpo",
+      "hive": "SOFTWARE",
+      "path": "Microsoft\\Windows\\Dwm",
+      "name": "OverlayTestMode",
+      "type": "REG_DWORD",
+      "value": "5",
+      "note": "Disables Multi-Plane Overlay. Fixes flicker / micro-stutter on some NVIDIA and AMD drivers."
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Mouse",
+      "name": "MouseSpeed",
+      "type": "REG_SZ",
+      "value": "0",
+      "note": "Disable mouse acceleration - raw input for competitive shooters."
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Mouse",
+      "name": "MouseThreshold1",
+      "type": "REG_SZ",
+      "value": "0"
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Mouse",
+      "name": "MouseThreshold2",
+      "type": "REG_SZ",
+      "value": "0"
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Accessibility\\StickyKeys",
+      "name": "Flags",
+      "type": "REG_SZ",
+      "value": "506",
+      "note": "Stop the Shift-key Sticky Keys prompt from interrupting a match."
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Accessibility\\Keyboard Response",
+      "name": "Flags",
+      "type": "REG_SZ",
+      "value": "122"
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Accessibility\\ToggleKeys",
+      "name": "Flags",
+      "type": "REG_SZ",
+      "value": "58"
+    },
+    {
+      "group": "latency_input_tweaks",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\DirectX\\UserGpuPreferences",
+      "name": "DirectXUserGlobalSettings",
+      "type": "REG_SZ",
+      "value": "SwapEffectUpgradeEnable=1;VRROptimizeEnable=0",
+      "note": "DXGI flip model / Optimizations for windowed games."
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Services\\Tcpip\\Parameters",
+      "name": "TcpAckFrequency",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Global default. Per-adapter values are applied at first boot."
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Services\\Tcpip\\Parameters",
+      "name": "TCPNoDelay",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Disables Nagle's algorithm."
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Services\\Tcpip\\Parameters",
+      "name": "TCPDelAckTicks",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Services\\Tcpip\\Parameters",
+      "name": "TcpMaxDataRetransmissions",
+      "type": "REG_DWORD",
+      "value": "5"
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\Psched",
+      "name": "NonBestEffortLimit",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Free the ~20% of bandwidth the QoS packet scheduler reserves."
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DeliveryOptimization",
+      "name": "DODownloadMode",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Stop Delivery Optimization seeding updates to other PCs mid-game."
+    },
+    {
+      "group": "network_latency_tweaks",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+      "name": "NoAutoRebootWithLoggedOnUsers",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Never auto-reboot out from under a session."
+    },
+    {
+      "group": "strip_background_noise",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications",
+      "name": "GlobalUserDisabled",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "group": "strip_background_noise",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\AppPrivacy",
+      "name": "LetAppsRunInBackground",
+      "type": "REG_DWORD",
+      "value": "2",
+      "note": "2 = force deny."
+    },
+    {
+      "group": "strip_background_noise",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects",
+      "name": "VisualFXSetting",
+      "type": "REG_DWORD",
+      "value": "2",
+      "note": "2 = best performance. AtlasOS default."
+    },
+    {
+      "group": "strip_background_noise",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\ScriptedDiagnostics",
+      "name": "EnableDiagnostics",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "AtlasOS disables troubleshooting so it cannot reset tweaks."
+    },
+    {
+      "group": "strip_background_noise",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\WDI",
+      "name": "ScenarioExecutionEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    }
+  ],
+  "services": [
+    { "group": "remove_xbox_gaming_stack", "name": "XblAuthManager", "start": 4, "note": "Xbox Live Auth Manager" },
+    { "group": "remove_xbox_gaming_stack", "name": "XblGameSave", "start": 4, "note": "Xbox Live Game Save" },
+    { "group": "remove_xbox_gaming_stack", "name": "XboxNetApiSvc", "start": 4, "note": "Xbox Live Networking Service" },
+    { "group": "remove_xbox_gaming_stack", "name": "XboxGipSvc", "start": 4, "note": "Xbox Accessory Management" },
+    { "group": "remove_xbox_gaming_stack", "name": "GamingServices", "start": 4, "note": "Gaming Services" },
+    { "group": "remove_xbox_gaming_stack", "name": "GamingServicesNet", "start": 4, "note": "Gaming Services Network" },
+    { "group": "strip_background_noise", "name": "WSearch", "start": 4, "note": "Windows Search indexing" },
+    { "group": "strip_background_noise", "name": "bthserv", "start": 4, "note": "Bluetooth Support Service" },
+    { "group": "strip_background_noise", "name": "BTAGService", "start": 4, "note": "Bluetooth Audio Gateway" },
+    { "group": "strip_background_noise", "name": "BluetoothUserService", "start": 4, "note": "Bluetooth User Support" },
+    { "group": "strip_background_noise", "name": "BthAvctpSvc", "start": 4, "note": "Bluetooth AVCTP" },
+    { "group": "strip_background_noise", "name": "Dosvc", "start": 4, "note": "Delivery Optimization" },
+    { "group": "disable_printing", "name": "Spooler", "start": 4, "note": "Print Spooler" },
+    { "group": "disable_printing", "name": "PrintNotify", "start": 4, "note": "Printer Extensions and Notifications" },
+    { "group": "disable_printing", "name": "Fax", "start": 4, "note": "Fax" },
+    { "group": "disable_printing", "name": "PrintWorkflowUserSvc", "start": 4, "note": "Print Workflow" },
+    { "group": "disable_printing", "name": "PrintScanBrokerService", "start": 4, "note": "Print / Scan Broker" }
+  ],
+  "appxPrefixes": [
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.XboxIdentityProvider_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.GamingServices_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.XboxApp_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.XboxGameCallableUI_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.XboxGamingOverlay_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.XboxGameOverlay_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.XboxSpeechToTextOverlay_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.Xbox.TCUI_" },
+    { "group": "remove_xbox_gaming_stack", "prefix": "Microsoft.GamingApp_" }
+  ],
+  "systemPackages": [
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Printing-Foundation-Features-Package~" },
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Printing-Foundation-InternetPrinting-Client-Package~" },
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Printing-Foundation-LPDPrintService-Package~" },
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Printing-Foundation-LPRPortMonitor-Package~" },
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Printing-XPSServices-Package~" },
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Printing-PMCPPC-FoD-Package~" },
+    { "group": "disable_printing", "pattern": "Microsoft-Windows-Fax-Service-Package~" }
+  ],
+  "optionalFeatures": [
+    { "group": "disable_printing", "name": "Printing-Foundation-Features" },
+    { "group": "disable_printing", "name": "Printing-Foundation-InternetPrinting-Client" },
+    { "group": "disable_printing", "name": "Printing-Foundation-LPDPrintService" },
+    { "group": "disable_printing", "name": "Printing-Foundation-LPRPortMonitor" },
+    { "group": "disable_printing", "name": "Printing-XPSServices-Features" },
+    { "group": "disable_printing", "name": "FaxServicesClientPackage" }
+  ],
+  "runtimeDownloads": [
+    {
+      "id": "vcredist-x64",
+      "group": "install_game_runtimes",
+      "url": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+      "file": "vc_redist.x64.exe",
+      "installArgs": "/install /quiet /norestart",
+      "note": "Visual C++ 2015-2022 Redistributable (x64)"
+    },
+    {
+      "id": "vcredist-x86",
+      "group": "install_game_runtimes",
+      "url": "https://aka.ms/vs/17/release/vc_redist.x86.exe",
+      "file": "vc_redist.x86.exe",
+      "installArgs": "/install /quiet /norestart",
+      "note": "Visual C++ 2015-2022 Redistributable (x86)"
+    },
+    {
+      "id": "dotnet-desktop-8",
+      "group": "install_game_runtimes",
+      "url": "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe",
+      "file": "windowsdesktop-runtime-8-x64.exe",
+      "installArgs": "/install /quiet /norestart",
+      "note": ".NET 8 Desktop Runtime (x64)"
+    },
+    {
+      "id": "directx-jun2010",
+      "group": "install_game_runtimes",
+      "url": "https://download.microsoft.com/download/8/4/a/84a35bf1-dafe-4ae8-82af-ad2ae20b6b14/directx_Jun2010_redist.exe",
+      "file": "directx_Jun2010_redist.exe",
+      "extract": true,
+      "installer": "DXSETUP.exe",
+      "installArgs": "/silent",
+      "note": "DirectX 9.0c End-User Runtime (June 2010) - required by many older titles"
+    }
+  ],
+  "revert": {
+    "reversible": [
+      { "hive": "NTUSER", "path": "SOFTWARE\\Microsoft\\GameBar", "name": "AllowAutoGameMode", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "SOFTWARE\\Microsoft\\GameBar", "name": "AutoGameModeEnabled", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "System\\GameConfigStore", "name": "GameDVR_FSEBehavior", "type": "REG_DWORD", "value": "0" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control\\DeviceGuard", "name": "EnableVirtualizationBasedSecurity", "type": "REG_DWORD", "value": "1" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity", "name": "Enabled", "type": "REG_DWORD", "value": "1" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control\\Session Manager\\Memory Management", "name": "FeatureSettingsOverride", "type": "REG_DWORD", "value": "0" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control\\Session Manager\\Memory Management", "name": "FeatureSettingsOverrideMask", "type": "REG_DWORD", "value": "0" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control\\Session Manager\\Power", "name": "HiberbootEnabled", "type": "REG_DWORD", "value": "1" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control\\Power", "name": "HibernateEnabled", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Control Panel\\Mouse", "name": "MouseSpeed", "type": "REG_SZ", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", "name": "GlobalUserDisabled", "type": "REG_DWORD", "value": "0" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects", "name": "VisualFXSetting", "type": "REG_DWORD", "value": "0" }
+    ],
+    "serviceRestore": [
+      { "name": "WSearch", "start": 2 },
+      { "name": "bthserv", "start": 3 },
+      { "name": "BTAGService", "start": 3 },
+      { "name": "Dosvc", "start": 2 },
+      { "name": "Spooler", "start": 2 },
+      { "name": "XblAuthManager", "start": 3 },
+      { "name": "XboxNetApiSvc", "start": 3 }
+    ],
+    "irreversible": [
+      "Windows Defender / Security - fully removed from the image by -RemoveDefender. Reinstall Windows or use the Standard variant to get it back.",
+      "Printing optional features - the printing payload is removed from the image. Re-adding requires servicing packages.",
+      "Xbox AppX packages - reinstallable from the Microsoft Store, but the Store itself is also removed on Core.",
+      "Boot configuration (bcdedit) - hypervisorlaunchtype and mitigation flags are applied at first boot and must be changed with bcdedit."
+    ]
+  }
+}
