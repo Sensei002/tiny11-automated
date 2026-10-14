@@ -3,6 +3,7 @@
 [![Build Tiny11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml)
 [![Build Tiny11 Core](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml)
 [![Build Nano11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml)
+[![Build Tiny11 Core-Gaming](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml)
 [![SourceForge Downloads](https://img.shields.io/sourceforge/dt/tiny-11-releases.svg)](https://sourceforge.net/projects/tiny-11-releases/files/latest/download)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -32,6 +33,14 @@
 
 ## 🆕 What's New (January 2026)
 
+**🎮 Tiny11 Core-Gaming — new variant:**
+- ⚡ **AtlasOS-style power scheme**: no CPU idle (C-State 0), no core parking, no USB/PCIe power saving
+- 🎯 **Latency-first tweaks**: Game Mode off, Fullscreen Optimizations off, MPO off, mouse acceleration off
+- 🔓 **Security mitigations off**: VBS / Memory Integrity / Credential Guard / Spectre-Meltdown
+- 📦 **Game runtimes bundled**: VC++ 2015–2022, DirectX 9.0c, .NET 8 Desktop — installed at first boot
+- 🔁 **Reversible**: ships an undo script and a per-build manifest inside the ISO
+- 📖 Full details in **[GAMING.md](GAMING.md)**
+
 **Windows 11 26H2 Optimizations:**
 - ✨ **AI/Recall Removal**: Complete removal of Copilot, Recall, and AI Fabric (~220 MB saved)
 - 🛡️ **Enhanced Telemetry Blocking**: Stronger privacy protection with additional registry tweaks
@@ -57,6 +66,9 @@ Tiny11 Automated Builder provides **production-ready PowerShell scripts** to cre
 🛠️ **System requirement bypass** (TPM, CPU, RAM checks removed)
 
 **Three variants** available: **Standard** (daily use), **Core** (ultra-minimal), **Nano** (VM testing)
+
+**Plus an opt-in gaming profile**: **Core-Gaming** layers a latency-first, AtlasOS-style
+tweak set on top of Core for competitive esports. See **[GAMING.md](GAMING.md)**.
 
 ### 🙏 Attribution
 
@@ -95,6 +107,7 @@ Perfect for beginners and automated deployments:
    - `Build Tiny11` → Standard trimmed Windows 11
    - `Build Tiny11 Core` → Ultra-minimal variant
    - `Build Nano11` → EXTREME minimal (VM only)
+   - `Build Tiny11 Core-Gaming` → Core + latency-first gaming profile
 4. Click **"Run workflow"** and configure:
    - Windows ISO URL
    - Edition (Home/Pro/Education)
@@ -219,6 +232,81 @@ Set-ExecutionPolicy Bypass -Scope Process
 - **🟢 Standard**: Best for most users. Balanced bloat removal with system stability
 - **🟡 Core**: Perfect for development VMs, testing environments, disposable systems
 - **🔴 Nano**: Absolute minimal testing only. Expect broken features. VM use ONLY.
+- **🎮 Core-Gaming**: Core plus a latency-first gaming profile. Built for competitive
+  esports on older hardware — see the section below before you use it.
+
+---
+
+## 🎮 Tiny11 Core-Gaming
+
+An opt-in profile that turns Core into a latency-first gaming build, modelled on what
+[AtlasOS](https://github.com/Atlas-OS/Atlas) does. The reference workload is Rainbow Six
+Siege on a CPU-bound machine.
+
+> ⚠️ **This is not a safe daily-driver configuration.** It disables VBS, Memory
+> Integrity, Credential Guard and the Spectre/Meltdown kernel mitigations, and it
+> removes the Xbox stack. That is a deliberate performance trade-off. An undo script
+> and a per-build manifest ship inside the image.
+
+### What it applies
+
+| Area | Changes |
+|------|---------|
+| **Power** | New *Tiny11 Core-Gaming* scheme — no CPU idle (C-State 0), no core parking, 100% min processor state, aggressive boost, no USB/PCIe power saving, no disk/sleep timeout. Generated from Microsoft's own templates, **not** a renamed Ultimate Performance |
+| **CPU** | Power throttling off, `SystemResponsiveness` = 10 (AtlasOS value) |
+| **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
+| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on |
+| **Display** | Fullscreen Optimizations **off** (true fullscreen exclusive) |
+| **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
+| **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
+| **Runtimes** | VC++ 2015–2022 (x64 + x86), DirectX 9.0c, .NET 8 Desktop — bundled and installed at first boot |
+
+### How to build it
+
+**GitHub Actions** → run the **Build and Release Tiny11 Core-Gaming** workflow. It keeps
+every input from *Build and Release Tiny11 Core* and adds one toggle per group, so you
+can dial any of it back per build.
+
+**Locally:**
+
+```powershell
+# Full Core-Gaming build
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender -PreserveWinRE
+
+# Dial specific groups back
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
+    -GamingGroups @{ disable_security_mitigations = $false; install_game_runtimes = $false }
+```
+
+### Customising it
+
+Every tweak lives in [`config/gaming_profile.json`](config/gaming_profile.json) as a
+group-tagged data entry — no PowerShell editing required. Adding a registry value is one
+JSON object.
+
+### Reverting it
+
+```powershell
+# Elevated PowerShell, inside the installed OS
+powershell -ExecutionPolicy Bypass -File C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1
+```
+
+Restores Game Mode, FSO, VBS / Memory Integrity, mitigations, Fast Startup, mouse
+acceleration, background apps and the Search / Bluetooth services, and switches the power
+plan back to Balanced. Defender removal, the printing features and the removed Xbox
+packages are not restorable from inside Windows — the script says so explicitly.
+
+### Read this before using it
+
+- **Frame-time consistency improves more than average FPS.** The biggest single lever is
+  disabling VBS/HVCI (commonly quoted at 5–15% on affected titles); the rest is mostly
+  1% lows and input latency.
+- **Some tweaks are hardware-specific.** HPET / timer settings in particular help some
+  rigs and regress others. Benchmark your own machine.
+- **BattlEye is unaffected.** R6 Siege via Steam or Ubisoft Connect does not care about
+  any of this. Game Pass and Microsoft Store games, however, **will** break.
+
+Full write-up, per-setting rationale and trade-offs: **[GAMING.md](GAMING.md)**.
 
 ---
 
@@ -230,15 +318,24 @@ tiny11-automated/
 │   ├── workflows/              # GitHub Actions CI/CD
 │   │   ├── build-tiny11.yml
 │   │   ├── build-tiny11-core.yml
+│   │   ├── build-tiny11-core-gaming.yml   # 🎮 Core + gaming profile
 │   │   └── build-nano11.yml
 │   ├── ISSUE_TEMPLATE/         # Issue templates
 │   └── PULL_REQUEST_TEMPLATE.md
+├── config/
+│   ├── matrix_config.json              # Release-detection / trigger config
+│   ├── gaming_profile.json             # 🎮 Every gaming tweak, group-tagged
+│   └── gaming_power_settings.json      # 🎮 Power scheme + bcdedit definition
 ├── scripts/
 │   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
-│   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core
-│   └── nano11builder-headless.ps1        # ✨ Automated Nano
+│   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core (+ -GamingProfile)
+│   ├── nano11builder-headless.ps1        # ✨ Automated Nano
+│   ├── gaming-profile.ps1                # 🎮 Profile engine (dot-sourced)
+│   ├── gaming-firstboot.ps1              # 🎮 Runs once as SYSTEM on the target
+│   └── Undo-GamingTweaks.ps1             # 🎮 Revert, shipped inside the image
 ├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
+├── GAMING.md                   # 🎮 Core-Gaming documentation
 ├── CONTRIBUTING.md             # Contributor guidelines
 ├── CODE_OF_CONDUCT.md          # Community standards
 ├── SECURITY.md                 # Security policy
@@ -270,6 +367,28 @@ tiny11-automated/
     [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x8007000B)
     [-RemoveDefender]          # Completely remove Windows Defender / Security (no Antimalware service)
 ```
+
+### Core-Gaming Parameters
+
+```powershell
+.\tiny11coremaker-headless.ps1
+    -GamingProfile             # Enable the Core-Gaming profile
+    [-GamingProfileFile <path>]# Profile JSON (default: config/gaming_profile.json)
+    [-GamingGroups <hashtable>]# Per-group overrides, e.g. @{ disable_mpo = $false }
+    [-HagsMode <on|off|leave>] # HAGS. Default: on
+```
+
+`-GamingGroups` accepts any of these keys (they match the workflow inputs):
+
+```
+atlas_power_scheme            disable_cpu_idle          disable_security_mitigations
+remove_xbox_gaming_stack      strip_background_noise    disable_fast_startup
+network_latency_tweaks        disable_mpo               latency_input_tweaks
+disable_fso                   disable_game_mode         disable_printing
+install_game_runtimes
+```
+
+See **[GAMING.md](GAMING.md)** for what each group does and what it breaks.
 
 ### Account Setup (Standard & Core)
 
@@ -689,6 +808,39 @@ preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
   default: false
 ```
 
+#### 4. Build Tiny11 Core-Gaming 🎮
+**File**: `.github/workflows/build-tiny11-core-gaming.yml`
+
+Accepts **every input from Build Tiny11 Core** (`windows_version`, `windows_iso_url`,
+`windows_build`, `image_index`, `language`, `skip_cleanup`, `enable_dotnet35`,
+`preserve_winre`, `remove_defender`, `account_setup`) plus one toggle per gaming group:
+
+```yaml
+hags:                       # type: choice
+  options: [on, off, leave] # default: on
+
+# Each of these is a boolean, default: true
+atlas_power_scheme:         # AtlasOS-style power scheme
+disable_cpu_idle:           # Force C-State 0
+disable_security_mitigations: # VBS / HVCI / Credential Guard / Spectre-Meltdown off
+remove_xbox_gaming_stack:   # Removes Xbox + Gaming Services (breaks Game Pass)
+strip_background_noise:     # Search indexing, Bluetooth, background apps, ...
+disable_fast_startup:       # Hibernation + Fast Startup off
+network_latency_tweaks:     # Nagle off, QoS 0, Delivery Optimization P2P off
+disable_mpo:                # Multi-Plane Overlay off
+latency_input_tweaks:       # Mouse acceleration off, DXGI flip model on
+disable_fso:                # Fullscreen Optimizations off
+disable_game_mode:          # Game Mode off (AtlasOS default)
+disable_printing:           # Print services + features removed
+install_game_runtimes:      # VC++ / DirectX 9.0c / .NET 8 bundled
+```
+
+The build also validates `config/gaming_profile.json` and parses
+`scripts/gaming-profile.ps1` **before** downloading the ISO, so a typo fails in seconds
+instead of after an hour.
+
+Full details: **[GAMING.md](GAMING.md)**
+
 ### Workflow Features
 
 ✨ **Automated download** - Fetches ISO automatically  
@@ -928,6 +1080,7 @@ Found a security issue? **DO NOT create a public GitHub issue!**
 ### 📚 Available Documentation
 
 - **[README.md](README.md)** - This file (overview & quick start)
+- **[GAMING.md](GAMING.md)** - 🎮 Tiny11 Core-Gaming: every tweak, its risk, and how to revert
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** - Community guidelines
 - **[SECURITY.md](SECURITY.md)** - Security policy & reporting
