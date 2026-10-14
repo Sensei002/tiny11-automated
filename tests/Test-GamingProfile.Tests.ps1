@@ -148,6 +148,43 @@ Describe 'Gaming profile JSON' {
         ($names | Where-Object { $_.name -eq 'Enabled' })                            | Should -Not -BeNullOrEmpty
         ($names | Where-Object { $_.name -eq 'FeatureSettingsOverride' -and $_.value -eq '3' }) | Should -Not -BeNullOrEmpty
     }
+
+    It 'removes shell delays and shortens the close timeouts for instant window response' {
+        $byName = @{}
+        foreach ($entry in $profile.registry) { $byName["$($entry.group)/$($entry.name)"] = $entry.value }
+
+        # Animations and delays
+        $byName['instant_windows/MinAnimate']         | Should -Be '0'
+        $byName['instant_windows/MenuShowDelay']      | Should -Be '0'
+        $byName['instant_windows/MouseHoverTime']     | Should -Be '0'
+        $byName['instant_windows/TaskbarAnimations']  | Should -Be '0'
+        $byName['instant_windows/EnableTransparency'] | Should -Be '0'
+
+        # Close-path timeouts - these are the ones that make closing feel instant.
+        # Windows defaults are 5000 / 20000 / 5000 ms respectively.
+        $byName['instant_windows/HungAppTimeout']           | Should -Be '1000'
+        $byName['instant_windows/WaitToKillAppTimeout']     | Should -Be '2000'
+        $byName['instant_windows/WaitToKillServiceTimeout'] | Should -Be '2000'
+        $byName['instant_windows/AutoEndTasks']             | Should -Be '1'
+    }
+
+    It 'reverts every instant_windows value it changes' {
+        $revertNames = @($profile.revert.reversible | Where-Object {
+            $_.path -like 'Control Panel\Desktop*' -or
+            $_.name -in @('TaskbarAnimations', 'EnableTransparency', 'MinAnimate',
+                          'MenuShowDelay', 'MouseHoverTime', 'EnableAeroPeek',
+                          'ListviewAlphaSelect', 'ListviewShadow', 'DisallowShaking',
+                          'Start_TrackProgs', 'Start_TrackDocs',
+                          'ExtendedUIHoverTime', 'WaitToKillServiceTimeout',
+                          'HungAppTimeout', 'WaitToKillAppTimeout', 'AutoEndTasks')
+        } | ForEach-Object { $_.name })
+
+        foreach ($name in @('MinAnimate', 'MenuShowDelay', 'MouseHoverTime', 'AutoEndTasks',
+                            'HungAppTimeout', 'WaitToKillAppTimeout', 'WaitToKillServiceTimeout',
+                            'EnableTransparency', 'TaskbarAnimations', 'DisallowShaking')) {
+            $revertNames | Should -Contain $name
+        }
+    }
 }
 
 Describe 'Gaming power settings JSON' {
@@ -338,11 +375,30 @@ Describe 'Core-Gaming workflow' {
     It 'adds a toggle for every gaming group' {
         foreach ($input in @(
             'hags', 'atlas_power_scheme', 'disable_cpu_idle', 'disable_security_mitigations',
-            'remove_xbox_gaming_stack', 'strip_background_noise', 'disable_fast_startup',
+            'remove_xbox_gaming_stack', 'strip_background_noise', 'instant_windows',
+            'disable_fast_startup',
             'network_latency_tweaks', 'disable_mpo', 'latency_input_tweaks', 'disable_fso',
             'disable_game_mode', 'disable_printing', 'install_game_runtimes'
         )) {
             $workflowRaw | Should -Match "(?m)^\s{6}$([regex]::Escape($input)):"
+        }
+    }
+
+    It 'declares exactly one toggle per profile group' {
+        # Catches a group added to the profile but never exposed in the workflow UI.
+        # Slice to the workflow_dispatch block so unrelated 6-space keys (e.g. the
+        # permissions entries) are not picked up.
+        $start = $workflowRaw.IndexOf('workflow_dispatch:')
+        $end   = $workflowRaw.IndexOf("`nenv:", $start)
+        $start | Should -BeGreaterThan 0
+        $end   | Should -BeGreaterThan $start
+        $inputsBlock = $workflowRaw.Substring($start, $end - $start)
+
+        $gamingInputs = [regex]::Matches($inputsBlock, '(?m)^\s{6}([a-z_]+):') |
+            ForEach-Object { $_.Groups[1].Value }
+
+        foreach ($group in @($profile.defaultGroups.PSObject.Properties.Name)) {
+            $gamingInputs | Should -Contain $group
         }
     }
 

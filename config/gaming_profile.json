@@ -15,6 +15,7 @@
     "disable_security_mitigations": true,
     "remove_xbox_gaming_stack": true,
     "strip_background_noise": true,
+    "instant_windows": true,
     "disable_fast_startup": true,
     "network_latency_tweaks": true,
     "disable_mpo": true,
@@ -30,6 +31,7 @@
     "disable_security_mitigations": "Turn off VBS, HVCI, Credential Guard, System Guard and Spectre/Meltdown mitigations.",
     "remove_xbox_gaming_stack": "Remove Xbox Live / Gaming Services stack and Xbox AppX packages.",
     "strip_background_noise": "Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics.",
+    "instant_windows": "Remove window/menu/hover animations and shell delays, and shorten the app-close timeouts so windows open and close as fast as the hardware allows.",
     "disable_fast_startup": "Disable hibernation and Fast Startup (Hiberboot).",
     "network_latency_tweaks": "Disable Nagle, QoS reserved bandwidth, Delivery Optimization P2P and WU auto-reboot.",
     "disable_mpo": "Disable Multi-Plane Overlay to remove flicker / micro-stutter on some GPUs.",
@@ -409,6 +411,157 @@
       "name": "ScenarioExecutionEnabled",
       "type": "REG_DWORD",
       "value": "0"
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Desktop\\WindowMetrics",
+      "name": "MinAnimate",
+      "type": "REG_SZ",
+      "value": "0",
+      "note": "The actual minimize/maximize animation toggle. VisualFXSetting alone does not reliably override this."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Desktop",
+      "name": "MenuShowDelay",
+      "type": "REG_SZ",
+      "value": "0",
+      "note": "Windows default is 400 ms before a menu appears. This is the most noticeable shell delay."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Desktop",
+      "name": "AutoEndTasks",
+      "type": "REG_SZ",
+      "value": "1",
+      "note": "End hung tasks automatically instead of waiting for a prompt."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Desktop",
+      "name": "HungAppTimeout",
+      "type": "REG_SZ",
+      "value": "1000",
+      "note": "Default 5000 ms. How long a window is allowed to hang before Windows considers it unresponsive."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Desktop",
+      "name": "WaitToKillAppTimeout",
+      "type": "REG_SZ",
+      "value": "2000",
+      "note": "Default 20000 ms. This is the 'window closing' latency: how long a slow app may linger on exit."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Control Panel\\Mouse",
+      "name": "MouseHoverTime",
+      "type": "REG_SZ",
+      "value": "0",
+      "note": "Default 400 ms hover delay."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "TaskbarAnimations",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "ListviewAlphaSelect",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Removes the selection fade in Explorer."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "ListviewShadow",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Removes the drop shadow behind icon labels."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "ExtendedUIHoverTime",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Default 400 ms taskbar thumbnail hover delay."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "ThumbnailLivePreviewHoverTime",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Default 400 ms live-preview hover delay."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "DisallowShaking",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Disables Aero Shake (shaking a window minimizes everything else)."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "Start_TrackProgs",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Stop the shell maintaining a most-used-programs list on every launch."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "Start_TrackDocs",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Stop the shell maintaining a recent-documents list."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+      "name": "EnableTransparency",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Windows 11 acrylic/blur effects cost work on every window draw."
+    },
+    {
+      "group": "instant_windows",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\Dwm",
+      "name": "EnableAeroPeek",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "group": "instant_windows",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control",
+      "name": "WaitToKillServiceTimeout",
+      "type": "REG_SZ",
+      "value": "2000",
+      "note": "Default 5000 ms. Service equivalent of WaitToKillAppTimeout."
     }
   ],
   "services": [
@@ -507,7 +660,23 @@
       { "hive": "SYSTEM", "path": "ControlSet001\\Control\\Power", "name": "HibernateEnabled", "type": "REG_DWORD", "value": "1" },
       { "hive": "NTUSER", "path": "Control Panel\\Mouse", "name": "MouseSpeed", "type": "REG_SZ", "value": "1" },
       { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", "name": "GlobalUserDisabled", "type": "REG_DWORD", "value": "0" },
-      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects", "name": "VisualFXSetting", "type": "REG_DWORD", "value": "0" }
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VisualEffects", "name": "VisualFXSetting", "type": "REG_DWORD", "value": "0" },
+      { "hive": "NTUSER", "path": "Control Panel\\Desktop\\WindowMetrics", "name": "MinAnimate", "type": "REG_SZ", "value": "1" },
+      { "hive": "NTUSER", "path": "Control Panel\\Desktop", "name": "MenuShowDelay", "type": "REG_SZ", "value": "400" },
+      { "hive": "NTUSER", "path": "Control Panel\\Desktop", "name": "AutoEndTasks", "type": "REG_SZ", "value": "0" },
+      { "hive": "NTUSER", "path": "Control Panel\\Desktop", "name": "HungAppTimeout", "type": "REG_SZ", "value": "5000" },
+      { "hive": "NTUSER", "path": "Control Panel\\Desktop", "name": "WaitToKillAppTimeout", "type": "REG_SZ", "value": "20000" },
+      { "hive": "NTUSER", "path": "Control Panel\\Mouse", "name": "MouseHoverTime", "type": "REG_SZ", "value": "400" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "TaskbarAnimations", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "ListviewAlphaSelect", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "ListviewShadow", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "ExtendedUIHoverTime", "type": "REG_DWORD", "value": "400" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "DisallowShaking", "type": "REG_DWORD", "value": "0" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "Start_TrackProgs", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "Start_TrackDocs", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "name": "EnableTransparency", "type": "REG_DWORD", "value": "1" },
+      { "hive": "NTUSER", "path": "Software\\Microsoft\\Windows\\Dwm", "name": "EnableAeroPeek", "type": "REG_DWORD", "value": "1" },
+      { "hive": "SYSTEM", "path": "ControlSet001\\Control", "name": "WaitToKillServiceTimeout", "type": "REG_SZ", "value": "5000" }
     ],
     "serviceRestore": [
       { "name": "WSearch", "start": 2 },

@@ -257,6 +257,7 @@ Siege on a CPU-bound machine.
 | **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
 | **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on |
 | **Display** | Fullscreen Optimizations **off** (true fullscreen exclusive) |
+| **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
 | **Runtimes** | VC++ 2015–2022 (x64 + x86), DirectX 9.0c, .NET 8 Desktop — bundled and installed at first boot |
@@ -825,6 +826,7 @@ disable_cpu_idle:           # Force C-State 0
 disable_security_mitigations: # VBS / HVCI / Credential Guard / Spectre-Meltdown off
 remove_xbox_gaming_stack:   # Removes Xbox + Gaming Services (breaks Game Pass)
 strip_background_noise:     # Search indexing, Bluetooth, background apps, ...
+instant_windows:            # Fastest window open/close: animations + delays off, close timeouts cut
 disable_fast_startup:       # Hibernation + Fast Startup off
 network_latency_tweaks:     # Nagle off, QoS 0, Delivery Optimization P2P off
 disable_mpo:                # Multi-Plane Overlay off

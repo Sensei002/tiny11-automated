@@ -16,6 +16,7 @@ Rainbow Six Siege on a CPU-bound machine.
 - [Building it](#building-it)
 - [What gets applied](#what-get-applied)
 - [The power scheme](#the-power-scheme)
+- [Instant window response](#instant-window-response)
 - [What breaks](#what-breaks)
 - [Reverting](#reverting)
 - [Customising without editing PowerShell](#customising-without-editing-powershell)
@@ -88,6 +89,7 @@ Group names match the workflow input names exactly.
 |---|---|
 | `disable_game_mode` | Turns Windows Game Mode **off** — see the note below |
 | `strip_background_noise` | Windows Search indexing off, Bluetooth off, Delivery Optimization service off, background apps globally denied, visual effects off, scripted diagnostics off |
+| `instant_windows` | Removes window/menu/hover animations and shell delays, and shortens the app-close timeouts — see [Instant window response](#instant-window-response) |
 | `disable_fast_startup` | Hibernation and Fast Startup off |
 | `disable_printing` | Print services disabled **and** the printing optional features removed from the image |
 | `remove_xbox_gaming_stack` | Xbox Live Auth, Xbox Game Save, Xbox Networking, Xbox Accessory Management, Gaming Services and Gaming Services Network all disabled; Xbox AppX packages removed |
@@ -151,6 +153,71 @@ can move it to another machine.
 > **Power cost.** C-State 0 means higher idle power and higher temperatures. AtlasOS
 > itself warns against this on laptops or poorly-cooled machines. Fine on a desktop
 > gaming rig; think twice on a laptop.
+
+---
+
+## Instant window response
+
+The `instant_windows` group makes windows open, close and respond as fast as the
+hardware allows.
+
+It is a separate group because the "adjust for best performance" preset
+(`VisualFXSetting=2`, set by `strip_background_noise`) is **not sufficient on its own**.
+The preset does not reliably override `MinAnimate`, and it does not touch any of the
+shell delays or the close-path timeouts at all.
+
+### Animations and delays
+
+| Value | Default | Set to |
+|---|---|---|
+| `MinAnimate` | 1 | **0** — the actual minimize/maximize animation toggle |
+| `MenuShowDelay` | **400 ms** | **0** — delay before any menu appears |
+| `MouseHoverTime` | **400 ms** | **0** |
+| `ExtendedUIHoverTime` | 400 ms | **0** — taskbar thumbnail hover |
+| `ThumbnailLivePreviewHoverTime` | 400 ms | **0** — live preview hover |
+| `TaskbarAnimations` | 1 | 0 |
+| `ListviewAlphaSelect` | 1 | 0 — selection fade in Explorer |
+| `ListviewShadow` | 1 | 0 — icon label drop shadow |
+| `EnableTransparency` | 1 | **0** — Windows 11 acrylic/blur, costs work on every window draw |
+| `EnableAeroPeek` | 1 | 0 |
+| `DisallowShaking` | 0 | 1 — disables Aero Shake |
+
+### Close-path timeouts
+
+This is the part that actually governs how fast a window **closes** when the app is
+slow to exit. Windows is very patient by default.
+
+| Value | Default | Set to | Effect |
+|---|---|---|---|
+| `WaitToKillAppTimeout` | **20 000 ms** | **2000 ms** | How long a slow app may linger on exit |
+| `HungAppTimeout` | 5000 ms | 1000 ms | How long before Windows calls a window unresponsive |
+| `WaitToKillServiceTimeout` | 5000 ms | 2000 ms | Same, for services |
+| `AutoEndTasks` | 0 | 1 | End hung tasks instead of waiting for a prompt |
+
+### Shell bookkeeping
+
+| Value | Set to | Effect |
+|---|---|---|
+| `Start_TrackProgs` | 0 | Stop the shell maintaining a most-used-programs list on every launch |
+| `Start_TrackDocs` | 0 | Stop the recent-documents list |
+
+### What is deliberately *not* changed
+
+- **`UserPreferencesMask`** — the master binary bitmask that `VisualFXSetting` writes.
+  It is left alone because hand-crafting the hex is error-prone and it also controls
+  ClearType font smoothing; getting it wrong makes text render worse for no speed gain.
+  The granular values above cover the effects that matter.
+- **`DragFullWindows`** — dragging a window still redraws its contents. Turning it off
+  makes a window collapse to a wireframe while dragged, which looks broken on modern
+  hardware and has nothing to do with opening or closing.
+- **`ForegroundLockTimeout`** — left at its default. Setting it to 0 lets background
+  windows steal focus, which is worse than the responsiveness it claims to add.
+- **Prefetch / SysMain** — still disabled, consistent with AtlasOS. Worth knowing:
+  this does slow *cold app launches*. Re-enabling it properly means re-enabling the
+  SysMain service, which is the opposite of what a stripped gaming build wants. If you
+  care more about launch speed than background footprint, see
+  [Customising](#customising-without-editing-powershell) — but note that
+  `EnablePrefetcher` alone does little while SysMain is off.
 
 ---
 

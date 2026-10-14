@@ -103,6 +103,11 @@ on:
         type: boolean
         required: false
         default: true
+      instant_windows:
+        description: 'Gaming: Fastest window open/close - removes window/menu/hover animations and shell delays, and shortens the app-close timeouts (WaitToKillAppTimeout 20s -> 2s).'
+        type: boolean
+        required: false
+        default: true
       disable_fast_startup:
         description: 'Gaming: Disable hibernation and Fast Startup (Hiberboot).'
         type: boolean
@@ -465,6 +470,7 @@ jobs:
             disable_security_mitigations = ("${{ github.event.inputs.disable_security_mitigations }}" -eq 'true')
             remove_xbox_gaming_stack    = ("${{ github.event.inputs.remove_xbox_gaming_stack }}"    -eq 'true')
             strip_background_noise      = ("${{ github.event.inputs.strip_background_noise }}"      -eq 'true')
+            instant_windows             = ("${{ github.event.inputs.instant_windows }}"             -eq 'true')
             disable_fast_startup        = ("${{ github.event.inputs.disable_fast_startup }}"        -eq 'true')
             network_latency_tweaks      = ("${{ github.event.inputs.network_latency_tweaks }}"      -eq 'true')
             disable_mpo                 = ("${{ github.event.inputs.disable_mpo }}"                 -eq 'true')
@@ -878,6 +884,7 @@ jobs:
             | Security mitigations off | ${{ github.event.inputs.disable_security_mitigations == 'true' && '✅' || '❌' }} |
             | Xbox / Gaming Services removed | ${{ github.event.inputs.remove_xbox_gaming_stack == 'true' && '✅' || '❌' }} |
             | Background noise stripped | ${{ github.event.inputs.strip_background_noise == 'true' && '✅' || '❌' }} |
+            | Instant window open/close | ${{ github.event.inputs.instant_windows == 'true' && '✅' || '❌' }} |
             | Fast Startup disabled | ${{ github.event.inputs.disable_fast_startup == 'true' && '✅' || '❌' }} |
             | Network latency tweaks | ${{ github.event.inputs.network_latency_tweaks == 'true' && '✅' || '❌' }} |
             | MPO disabled | ${{ github.event.inputs.disable_mpo == 'true' && '✅' || '❌' }} |
