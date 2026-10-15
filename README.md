@@ -34,8 +34,8 @@ Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 
       <sub><b>Windows 11 Pro, 26H2</b> — build 26300.9457, full edition intact</sub>
     </td>
     <td align="center" width="50%">
-      <img src="assets/screenshots/02-disk-footprint-6gb.png" alt="Tiny11 minimal disk footprint"><br>
-      <sub><b>~7 GB install footprint</b> — 111 GB free on a 118 GB drive</sub>
+      <img src="assets/screenshots/02-disk-footprint-6gb.png" alt="Tiny11 Core-Gaming disk footprint"><br>
+      <sub><b>~7 GB install footprint</b> — Tiny11 Core-Gaming, 111 GB free on a 118 GB drive</sub>
     </td>
   </tr>
   <tr>
