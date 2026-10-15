@@ -8,6 +8,7 @@
 
   "nvcleanstall": {
     "version": "1.19.0",
+    "bundledPath": "tools/NVCleanstall_1.19.0.exe",
     "downloadUrl": "https://closest-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",
     "mirrors": [
       "https://us1-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",

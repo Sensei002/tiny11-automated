@@ -319,7 +319,15 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_VERSION=$version"
 
           $outputDir = Join-Path $PWD 'nvidia-driver'
-          & .\scripts\nvidia-driver-builder.ps1 -DriverVersion $version -OutputDir $outputDir
+          $nvCleanstall = Join-Path $PWD 'tools\NVCleanstall_1.19.0.exe'
+
+          if (Test-Path $nvCleanstall) {
+            Write-Output "Using bundled NVCleanstall: $nvCleanstall"
+            & .\scripts\nvidia-driver-builder.ps1 -DriverVersion $version -OutputDir $outputDir -NvCleanstallPath $nvCleanstall
+          } else {
+            Write-Output "Bundled NVCleanstall not found - the engine will download it."
+            & .\scripts\nvidia-driver-builder.ps1 -DriverVersion $version -OutputDir $outputDir
+          }
 
           $infoPath = Join-Path $outputDir 'nvidia-driver-buildinfo.json'
           if (-not (Test-Path $infoPath)) {

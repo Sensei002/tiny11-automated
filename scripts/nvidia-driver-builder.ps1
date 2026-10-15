@@ -87,7 +87,10 @@ param (
     [int]$GuiTimeoutSeconds = 0,
 
     [Parameter(Mandatory=$false)]
-    [string]$LogFile
+    [string]$LogFile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Explicit path to NVCleanstall.exe. When omitted, a copy vendored in the repository (tools/) is used, then the download.")]
+    [string]$NvCleanstallPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -351,16 +354,35 @@ function Get-FileWithRetry {
 }
 
 function Get-NvCleanstallTool {
-    param($NvProfile)
-    $toolPath = Join-Path $WorkDir ("NVCleanstall_{0}.exe" -f $NvProfile.nvcleanstall.version)
+    param($NvProfile, [string]$ExplicitPath)
 
-    if (Test-Path -LiteralPath $toolPath) {
-        $existing = (Get-FileHash -LiteralPath $toolPath -Algorithm SHA256).Hash
-        if ($existing -ieq $NvProfile.nvcleanstall.sha256) {
-            Write-Log "NVCleanstall already present and verified: $toolPath"
-            return $toolPath
+    # Resolution order:
+    #   1. An explicitly supplied path (-NvCleanstallPath / workflow input).
+    #   2. A copy vendored in the repository (config: nvcleanstall.bundledPath).
+    #   3. A previously downloaded copy in the work dir.
+    #   4. Download from TechPowerUp (last resort - their CDN is anti-bot, which is
+    #      exactly why the binary is vendored in tools/).
+    $repoRoot   = Split-Path $PSScriptRoot -Parent
+    $candidates = New-Object System.Collections.ArrayList
+    if ($ExplicitPath) { $candidates.Add($ExplicitPath) | Out-Null }
+    if ($NvProfile.nvcleanstall.bundledPath) {
+        $candidates.Add((Join-Path $repoRoot $NvProfile.nvcleanstall.bundledPath)) | Out-Null
+    }
+    $cachedPath = Join-Path $WorkDir ("NVCleanstall_{0}.exe" -f $NvProfile.nvcleanstall.version)
+    $candidates.Add($cachedPath) | Out-Null
+
+    foreach ($candidate in $candidates) {
+        if (-not $candidate -or -not (Test-Path -LiteralPath $candidate)) { continue }
+        $hash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash
+        if ($hash -ieq $NvProfile.nvcleanstall.sha256) {
+            Write-Log "Using verified NVCleanstall at $candidate"
+            return $candidate
         }
-        Write-Log "Cached NVCleanstall hash mismatch, re-downloading" "WARN"
+        Write-Log "Ignoring $candidate - SHA256 mismatch (got $hash, expected $($NvProfile.nvcleanstall.sha256))" "WARN"
+    }
+
+    $toolPath = $cachedPath
+    if (Test-Path -LiteralPath $toolPath) {
         Remove-Item -LiteralPath $toolPath -Force -ErrorAction SilentlyContinue
     }
 
@@ -388,7 +410,7 @@ function Get-NvCleanstallTool {
         Remove-Item -LiteralPath $toolPath -Force -ErrorAction SilentlyContinue
     }
 
-    throw "Could not download a verified copy of NVCleanstall from any known mirror."
+    throw "Could not find a verified copy of NVCleanstall. Expected it bundled at '$($NvProfile.nvcleanstall.bundledPath)', and the download mirrors did not return a matching file."
 }
 
 #---------[ Path A: NVCleanstall GUI automation ]---------
@@ -860,7 +882,7 @@ try {
 
     if ($useGui) {
         try {
-            $tool = Get-NvCleanstallTool -NvProfile $nvProfile
+            $tool = Get-NvCleanstallTool -NvProfile $nvProfile -ExplicitPath $NvCleanstallPath
             $guiDriverDir = Invoke-NvCleanstallGuiBuild -NvProfile $nvProfile -ToolPath $tool
             $result = [PSCustomObject]@{ DriverDir = $guiDriverDir; Method = 'gui'; Resigned = $true }
             Write-Log "GUI path succeeded"

@@ -70,8 +70,9 @@ exactly as before, with no driver work at all.
 
 ### What it does
 
-1. Downloads [NVCleanstall](https://www.techpowerup.com/nvcleanstall/) and drives its
-   wizard to reproduce the reference build exactly:
+1. Uses the copy of [NVCleanstall](https://www.techpowerup.com/nvcleanstall/) vendored
+   in the repository at `tools/NVCleanstall_1.19.0.exe` (SHA256-verified on every run)
+   and drives its wizard to reproduce the reference build exactly:
    - **Components:** only `Display Driver (required)`. Every optional component —
      Legacy Control Panel, HD Audio via HDMI, VC++ 2017 runtimes, PhysX, USB-C,
      FrameView, Quadro View, Virtual Audio, Telemetry, NV Platform Controllers,
@@ -92,6 +93,10 @@ The build report is uploaded as an artifact (`nvidia-driver-buildinfo.json`).
 
 ### Caveats
 
+- NVCleanstall is vendored at `tools/NVCleanstall_1.19.0.exe` so builds never depend on
+  TechPowerUp's anti-bot download. It is TechPowerUp freeware — check their terms if you
+  redistribute this repository. The engine verifies its SHA256 before running it, and
+  falls back to downloading only if the bundled copy is missing.
 - The tweaks change the driver's INF, which invalidates NVIDIA's signature — that is
   why the driver is re-signed. The re-signed driver is trusted inside the image, but it
   is **not** the same as NVIDIA's own signed package; treat it accordingly.
@@ -102,8 +107,11 @@ The build report is uploaded as an artifact (`nvidia-driver-buildinfo.json`).
 ### Locally
 
 ```powershell
-# Build the debloated driver on its own
+# Build the debloated driver on its own (uses tools/NVCleanstall_1.19.0.exe)
 .\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36
+
+# Point at a different NVCleanstall build
+.\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36 -NvCleanstallPath D:\Drivers\NVCleanstall_1.19.0.exe
 
 # Skip the NVCleanstall GUI and use the deterministic fallback
 .\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36 -SkipGui

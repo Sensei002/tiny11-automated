@@ -41,6 +41,17 @@ Describe "NVIDIA driver profile" {
         $script:Profile.nvcleanstall.downloadUrl | Should -Match 'NVCleanstall_1\.19\.0\.exe$'
     }
 
+    It "vendors the NVCleanstall binary in the repository" {
+        $script:Profile.nvcleanstall.bundledPath | Should -Be 'tools/NVCleanstall_1.19.0.exe'
+        Test-Path -LiteralPath (Join-Path $script:RepoRoot $script:Profile.nvcleanstall.bundledPath) | Should -BeTrue
+    }
+
+    It "the vendored binary matches the pinned SHA256" {
+        $bundled = Join-Path $script:RepoRoot $script:Profile.nvcleanstall.bundledPath
+        (Get-FileHash -LiteralPath $bundled -Algorithm SHA256).Hash |
+            Should -Be $script:Profile.nvcleanstall.sha256.ToUpper()
+    }
+
     It "encodes every tweak that is ON in the reference screenshots" {
         $required = @(
             'disable_installer_telemetry_advertising',
@@ -97,6 +108,11 @@ Describe "NVIDIA driver engine" {
 
     It "verifies the NVCleanstall download before use" {
         $script:EngineContent -match 'Get-FileHash' | Should -BeTrue
+    }
+
+    It "prefers the vendored copy over downloading" {
+        $script:EngineContent -match 'bundledPath'      | Should -BeTrue
+        $script:EngineContent -match '\$NvCleanstallPath' | Should -BeTrue
     }
 }
 
