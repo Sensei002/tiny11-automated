@@ -23,6 +23,37 @@
 
 ---
 
+## 📸 What You Get
+
+Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 11 running on modest hardware (Intel Core i5-4570 / 8 GB RAM / NVIDIA GTX 950):
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/01-windows-11-pro-26h2.png" alt="Windows 11 Pro 26H2 in Settings > About"><br>
+      <sub><b>Windows 11 Pro, 26H2</b> — build 26300.9457, full edition intact</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/02-disk-footprint-6gb.png" alt="Tiny11 minimal disk footprint"><br>
+      <sub><b>~7 GB install footprint</b> — 111 GB free on a 118 GB drive</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/03-disk-footprint-10gb.png" alt="Tiny11 disk footprint with apps installed"><br>
+      <sub><b>~10 GB with apps installed</b> — still 107 GB free</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="assets/screenshots/04-idle-resources.jpg" alt="Tiny11 idle CPU and memory usage in Task Manager"><br>
+      <sub><b>Near-idle resources</b> — 3% CPU, 1.8 GB RAM, no background bloat</sub>
+    </td>
+  </tr>
+</table>
+
+> 💡 Footprint varies by variant and edition — **Standard** keeps more, **Core** and **Nano** go lower still. See the **Choose Your Variant** section below.
+
+---
+
 ## 📊 Project Stats
 
 - **📦 Total Downloads**: 261436 (and growing!)
@@ -324,6 +355,8 @@ tiny11-automated/
 │   │   └── build-nano11.yml
 │   ├── ISSUE_TEMPLATE/         # Issue templates
 │   └── PULL_REQUEST_TEMPLATE.md
+├── assets/
+│   └── screenshots/            # 📸 Build screenshots shown in the README
 ├── config/
 │   ├── matrix_config.json              # Release-detection / trigger config
 │   ├── gaming_profile.json             # 🎮 Every gaming tweak, group-tagged
