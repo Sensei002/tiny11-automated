@@ -157,6 +157,7 @@ $logFile = "$PSScriptRoot\tiny11-core_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 # only when -GamingProfile is set, so a plain Core build is completely unaffected.
 $gamingProfileData = $null
 $gamingGroupFlags = $null
+$gamingRuntimeStaging = $null
 $gamingConfigDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'config'
 
 if ($GamingProfile) {
@@ -1651,6 +1652,16 @@ try {
         } else {
             Write-Log "Gaming groups OFF: (none)"
         }
+
+        # Fetch the runtime payload now rather than near the end of the build. A network
+        # failure then costs seconds instead of an hour, and because the download is fatal
+        # the ISO can never be emitted with an empty runtime folder.
+        if (Test-GamingGroupEnabled -Groups $gamingGroupFlags -Name 'install_game_runtimes') {
+            $gamingRuntimeStaging = Join-Path $ScratchDisk 'gaming-runtime-payload'
+            Write-Log "Bundling game runtime payload into the ISO..."
+            Get-GamingRuntimePayload -Profile $gamingProfileData -Groups $gamingGroupFlags `
+                -Destination $gamingRuntimeStaging
+        }
     }
 
     Test-Prerequisites
@@ -1743,7 +1754,14 @@ try {
     # Only install.wim is touched - never boot.wim, which Ventoy inspects and patches.
     if ($GamingProfile) {
         New-GamingFirstBootPayload -Profile $gamingProfileData -Groups $gamingGroupFlags `
-            -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -HagsMode $HagsMode
+            -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -HagsMode $HagsMode `
+            -RuntimeSource $gamingRuntimeStaging
+
+        # The staging copy has been folded into the image; reclaim the scratch space.
+        if ($gamingRuntimeStaging -and (Test-Path -LiteralPath $gamingRuntimeStaging)) {
+            Remove-Item -LiteralPath $gamingRuntimeStaging -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Log "Removed runtime staging directory"
+        }
     }
 
     # Finalization phase

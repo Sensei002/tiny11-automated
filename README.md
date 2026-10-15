@@ -252,7 +252,7 @@ Siege on a CPU-bound machine.
 
 | Area | Changes |
 |------|---------|
-| **Power** | New *Tiny11 Core-Gaming* scheme — no CPU idle (C-State 0), no core parking, 100% min processor state, aggressive boost, no USB/PCIe power saving, no disk/sleep timeout. Generated from Microsoft's own templates, **not** a renamed Ultimate Performance |
+| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle |
 | **CPU** | Power throttling off, `SystemResponsiveness` = 10 (AtlasOS value) |
 | **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
 | **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on |
@@ -260,7 +260,7 @@ Siege on a CPU-bound machine.
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
-| **Runtimes** | VC++ 2015–2022 (x64 + x86), DirectX 9.0c, .NET 8 Desktop — bundled and installed at first boot |
+| **Runtimes** | VC++ 2015–2022 (x64 + x86), DirectX 9.0c, .NET 8 Desktop — downloaded and verified at build time, embedded in the ISO, installed during Setup before OOBE |
 
 ### How to build it
 

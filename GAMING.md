@@ -17,6 +17,7 @@ Rainbow Six Siege on a CPU-bound machine.
 - [What gets applied](#what-get-applied)
 - [The power scheme](#the-power-scheme)
 - [Instant window response](#instant-window-response)
+- [Game runtimes](#game-runtimes)
 - [What breaks](#what-breaks)
 - [Reverting](#reverting)
 - [Customising without editing PowerShell](#customising-without-editing-powershell)
@@ -93,7 +94,7 @@ Group names match the workflow input names exactly.
 | `disable_fast_startup` | Hibernation and Fast Startup off |
 | `disable_printing` | Print services disabled **and** the printing optional features removed from the image |
 | `remove_xbox_gaming_stack` | Xbox Live Auth, Xbox Game Save, Xbox Networking, Xbox Accessory Management, Gaming Services and Gaming Services Network all disabled; Xbox AppX packages removed |
-| `install_game_runtimes` | VC++ 2015–2022 (x64 + x86), DirectX 9.0c (June 2010) and .NET 8 Desktop Runtime downloaded at build time and silently installed at first boot |
+| `install_game_runtimes` | VC++ 2015–2022 (x64 + x86), DirectX 9.0c (June 2010) and .NET 8 Desktop Runtime — downloaded at build time, verified, embedded in the ISO, and installed during Setup before OOBE. See [Game runtimes](#game-runtimes) |
 
 Plus `-HagsMode on|off|leave` for Hardware Accelerated GPU Scheduling.
 
@@ -125,34 +126,60 @@ deliberately overrides four of its choices:
 
 ## The power scheme
 
-AtlasOS does not distribute a standalone `.pow` file — it configures power through
-`powercfg` and the registry. So this profile does the same thing: it **generates** a new
-scheme at first boot from [`config/gaming_power_settings.json`](config/gaming_power_settings.json).
+This is **verified against the real thing**, not approximated. The scheme active on the
+maintainer's machine was read with `powercfg -query`, and the result is worth knowing:
 
-It is explicitly **not** the built-in Ultimate Performance scheme. It is created by
-duplicating the High performance template, renaming the result to
-**"Tiny11 Core-Gaming"**, and then applying these values:
+> **AtlasOS's power scheme is Ultimate Performance plus exactly two overrides.**
+>
+> Of its 27 visible settings, **25 are byte-identical to the built-in Ultimate
+> Performance scheme.** The only differences are:
+>
+> | Setting | Ultimate Performance | Atlas |
+> |---|---|---|
+> | USB selective suspend (AC) | enabled (1) | **disabled (0)** |
+> | Turn off display after (AC) | 900 s | **never (0)** |
 
-| Setting | Value | Why |
+That has one important consequence: **the base template must be Ultimate Performance**,
+not High performance. Duplicating any other base cannot reproduce the scheme. Earlier
+versions of this profile duplicated High performance and layered values on top — close,
+but not a match.
+
+So `config/gaming_power_settings.json` now:
+
+- duplicates the **Ultimate Performance** template
+  (`e9a42b02-d5df-448d-aa00-03f14749eb61`), falling back to High performance then
+  Balanced if it is unavailable;
+- renames the result to **"Atlas Power Scheme"**;
+- writes all **27** settings explicitly, so the outcome matches whichever template was
+  actually available;
+- then applies the same BCD tuning as before.
+
+### The two Atlas overrides
+
+| Setting | AC | DC |
 |---|---|---|
-| Processor idle disable | **1 (no idle)** | C-State 0 only — the core esports setting |
-| Minimum / maximum processor state | 100% / 100% | No downclocking, no clock ramp lag |
-| Processor performance boost mode | Aggressive | Hidden by default; the script unhides it first |
-| Performance time check interval | 15 | Faster response to load changes |
-| Core parking min cores | 100% | No core parking |
-| Hard disk turn off | never | No spin-down latency |
-| Sleep after / display off | never | — |
-| USB selective suspend | disabled | Keeps mouse / keyboard / controller polling constant |
-| PCI Express ASPM | off | Removes PCIe link power-state latency for the GPU |
-| Wireless adapter power saving | max performance | — |
-| Energy saver policy | off | — |
+| USB selective suspend | 0 — disabled | 1 |
+| Turn off display after | 0 — never | 180 s |
 
-The scheme is also exported to `C:\Windows\Tiny11Gaming\Tiny11-Core-Gaming.pow` so you
-can move it to another machine.
+### Where this profile deliberately diverges from Atlas
+
+Atlas leaves **CPU idle enabled**. This profile disables it, forcing C-State 0 and
+removing the C-State wake penalty — the most useful single latency tweak for a CPU-bound
+esport. It is gated behind its own `disable_cpu_idle` toggle (on by default) and labelled
+as a divergence in the profile JSON, so turning that toggle off gives you an exact Atlas
+match.
+
+Three further CPU settings — boost mode (Aggressive), performance time-check interval
+(15) and core parking (disabled) — are written explicitly too. On the Ultimate
+Performance base they are redundant, but they guarantee the same behaviour if the base
+template ever falls back to High performance.
 
 > **Power cost.** C-State 0 means higher idle power and higher temperatures. AtlasOS
 > itself warns against this on laptops or poorly-cooled machines. Fine on a desktop
 > gaming rig; think twice on a laptop.
+
+The scheme is exported to `C:\Windows\Tiny11Gaming\Atlas-Power-Scheme.pow` so you can
+move it to another machine.
 
 ---
 
@@ -218,6 +245,57 @@ slow to exit. Windows is very patient by default.
   care more about launch speed than background footprint, see
   [Customising](#customising-without-editing-powershell) — but note that
   `EnablePrefetcher` alone does little while SysMain is off.
+
+---
+
+## Game runtimes
+
+`install_game_runtimes` bundles three things into the image:
+
+| Runtime | Why |
+|---|---|
+| Visual C++ 2015–2022 (x64 + x86) | Most modern games and launchers refuse to start without it |
+| DirectX 9.0c End-User Runtime (June 2010) | Legacy `d3dx9_*`, `d3dcompiler_*`, `xinput1_3`, `xaudio2_*` — needed by a lot of older titles |
+| .NET 8 Desktop Runtime (x64) | Required by a growing number of launchers and tools |
+
+### Where they are installed, and when
+
+The installers are **downloaded at build time, verified, and embedded in the ISO**. They
+are then installed by `Windows\Setup\Scripts\SetupComplete.cmd`, which Windows runs **as
+SYSTEM during Setup — before OOBE and before the first logon**. You never see it: by the
+time the desktop appears, everything is already installed. There is no post-install step.
+
+Two properties are guaranteed:
+
+- **The download is fatal.** If a runtime cannot be fetched — or comes back implausibly
+  small, which is what a 404 page saved as `.exe` looks like — the build stops. It stops
+  *before* the Windows ISO is downloaded, so a network problem costs seconds rather than
+  an hour. An ISO can never ship looking complete but missing the runtimes.
+- **The payload is verified inside the image** before the ISO is written. An empty
+  runtime folder fails the build.
+
+### Why they are not "baked in" at build time
+
+A fair thing to expect, so here is the honest answer.
+
+**MSI/EXE installers cannot be integrated into an offline image.** DISM's `/Add-Package`
+accepts only `.cab`, `.msu` and `.appx` — Microsoft does not ship these runtimes in those
+formats. The earliest point at which they can genuinely be *installed* is during Setup,
+which is what this does.
+
+It is possible to go further for two of the three, by extracting the payloads and copying
+files straight into the image:
+
+| Runtime | Bakeable by file copy? | Why |
+|---|---|---|
+| VC++ 2015–2022 | **Yes** | Its DLLs (`msvcp140.dll`, `vcruntime140.dll`, …) go directly into `System32` / `SysWOW64`, not WinSxS. Copying them in works. |
+| DirectX 9.0c | **Yes** | Same — `d3dx9_*`, `d3dcompiler_*` and `xinput1_3` live in `System32` / `SysWOW64`. |
+| .NET 8 Desktop Runtime | **No** | It is not a set of DLLs in `System32`. It is a directory tree under `C:\Program Files\dotnet\` plus `PATH` and registry registration for host resolution. Copying files alone does not produce a working install. |
+
+So a "fully baked" variant would cover two of the three, and would replace supported
+installer execution with hand-rolled image surgery that cannot be validated without
+booting the result. That trade-off has deliberately not been taken — it is a change worth
+making only on purpose, not by default.
 
 ---
 

@@ -151,7 +151,7 @@ function New-GamingPowerScheme {
     }
 
     # 5. Export for portability so the user can move the scheme to another machine.
-    $powPath = Join-Path $GamingDir 'Tiny11-Core-Gaming.pow'
+    $powPath = Join-Path $GamingDir 'Atlas-Power-Scheme.pow'
     & powercfg -export $powPath $schemeGuid 2>&1 | Out-Null
     if (Test-Path -LiteralPath $powPath) {
         Write-Log "Exported scheme to $powPath"

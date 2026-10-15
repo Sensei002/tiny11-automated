@@ -503,10 +503,18 @@ function Invoke-GamingOptionalFeatureRemoval {
 #---------[ Runtime payload ]---------#
 
 function Get-GamingRuntimePayload {
+    # Downloads the runtime installers that ship inside the image.
+    #
+    # This is deliberately fatal by default. A silent failure here produces an ISO that
+    # looks fine but is missing the runtimes, which the user only discovers after
+    # installing. The builder calls this EARLY (before the Windows ISO is downloaded)
+    # so a network problem costs seconds, not the whole build.
     param(
         $Profile,
         [hashtable]$Groups,
-        [string]$Destination
+        [string]$Destination,
+        [bool]$FailOnError = $true,
+        [int]$MinimumBytes = 102400
     )
 
     if (-not (Test-GamingGroupEnabled -Groups $Groups -Name 'install_game_runtimes')) {
@@ -524,6 +532,8 @@ function Get-GamingRuntimePayload {
     }
 
     $downloaded = 0
+    $failures = @()
+
     foreach ($runtime in $Profile.runtimeDownloads) {
         $group = Get-GamingProp $runtime 'group'
         if (-not (Test-GamingGroupEnabled -Groups $Groups -Name $group)) { continue }
@@ -536,16 +546,34 @@ function Get-GamingRuntimePayload {
         try {
             Write-GamingLog "  downloading $file ($note)"
             Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing -TimeoutSec 300
-            $sizeMB = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
+
+            $bytes = (Get-Item -LiteralPath $outFile).Length
+            if ($bytes -lt $MinimumBytes) {
+                # A 404 or an error page saved under an .exe name is the classic silent
+                # failure here, so reject anything implausibly small.
+                throw "downloaded file is only $bytes bytes - expected at least $MinimumBytes"
+            }
+
+            $sizeMB = [math]::Round($bytes / 1MB, 1)
             Write-GamingLog "  got $file (${sizeMB} MB)"
             $downloaded++
         } catch {
-            # Non-fatal: a missing runtime must never fail the whole ISO build.
-            Write-GamingLog "  could not download $file : $_" 'WARN'
+            Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
+            $failures += "$file : $($_.Exception.Message)"
+            Write-GamingLog "  FAILED $file : $($_.Exception.Message)" 'ERROR'
         }
     }
 
     $script:GamingStats.runtimes = $downloaded
+
+    if ($failures.Count -gt 0) {
+        $message = "Could not bundle $($failures.Count) game runtime(s): " + ($failures -join ' | ')
+        if ($FailOnError) {
+            throw $message
+        }
+        Write-GamingLog $message 'WARN'
+    }
+
     Write-GamingLog "Game runtimes bundled: $downloaded"
 }
 
@@ -649,7 +677,8 @@ function New-GamingFirstBootPayload {
         [hashtable]$Groups,
         [string]$ScratchDir,
         [string]$ScriptRoot,
-        [string]$HagsMode = 'on'
+        [string]$HagsMode = 'on',
+        [string]$RuntimeSource
     )
 
     $gamingDir = Join-Path $ScratchDir 'Windows\Tiny11Gaming'
@@ -703,9 +732,30 @@ function New-GamingFirstBootPayload {
     New-GamingManifest -Profile $Profile -Groups $Groups `
         -Destination (Join-Path $gamingDir 'GAMING_PROFILE.md') -HagsMode $HagsMode
 
-    # Runtime installers.
+    # Runtime installers. The builder normally downloads these up front and hands over a
+    # staging directory; the fallback download keeps this module usable standalone.
     if (Test-GamingGroupEnabled -Groups $Groups -Name 'install_game_runtimes') {
-        Get-GamingRuntimePayload -Profile $Profile -Groups $Groups -Destination $runtimeDir
+        if ($RuntimeSource -and (Test-Path -LiteralPath $RuntimeSource)) {
+            # Copy-Item with a wildcard errors on an empty directory, so count first and
+            # let the verification below produce the clear message instead.
+            $sourceItems = @(Get-ChildItem -Path $RuntimeSource -File -ErrorAction SilentlyContinue)
+            if ($sourceItems.Count -gt 0) {
+                Copy-Item -Path (Join-Path $RuntimeSource '*') -Destination $runtimeDir -Force -Recurse
+                Write-GamingLog "  copied $($sourceItems.Count) runtime file(s) from $RuntimeSource"
+            } else {
+                Write-GamingLog "  runtime staging directory is empty: $RuntimeSource" 'WARN'
+            }
+        } else {
+            Get-GamingRuntimePayload -Profile $Profile -Groups $Groups -Destination $runtimeDir
+        }
+
+        # Never emit an ISO whose runtime folder is empty - that is precisely the
+        # "not out of the box" failure this step exists to prevent.
+        $staged = @(Get-ChildItem -Path $runtimeDir -Filter '*.exe' -File -ErrorAction SilentlyContinue)
+        if ($staged.Count -eq 0) {
+            throw "install_game_runtimes is enabled but no runtime installers were staged into the image"
+        }
+        Write-GamingLog "  runtime payload verified: $($staged.Count) installer(s)"
     }
 
     # SetupComplete.cmd runs once as SYSTEM after setup finishes and before the first

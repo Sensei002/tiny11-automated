@@ -194,22 +194,57 @@ Describe 'Gaming power settings JSON' {
         $power | Should -Not -BeNullOrEmpty
     }
 
-    It 'names a scheme that is not the built-in Ultimate Performance' {
-        $power.schemeName | Should -Be 'Tiny11 Core-Gaming'
-        $power.schemeName | Should -Not -Match 'Ultimate'
-    }
-
-    It 'uses the High performance template first' {
-        $power.baseTemplate.guid | Should -Be '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c'
+    It 'uses the Ultimate Performance template, because that is what Atlas derives from' {
+        # Verified against the live Atlas scheme: 25 of its 27 visible settings are
+        # byte-identical to Ultimate Performance. Duplicating any other base would not
+        # reproduce it, so this must NOT be changed to High performance.
+        $power.baseTemplate.guid | Should -Be 'e9a42b02-d5df-448d-aa00-03f14749eb61'
     }
 
     It 'provides fallback templates' {
         @($power.baseTemplate.fallbacks).Count | Should -BeGreaterThan 0
     }
 
+    It 'records what it was matched against' {
+        $power.matchedAgainst.guid | Should -Be '11111111-1111-1111-1111-111111111111'
+        $power.matchedAgainst.name | Should -Be 'Atlas Power Scheme'
+        $power.matchedAgainst.finding | Should -Match 'Ultimate Performance'
+    }
+
+    It 'carries all 27 settings from the live Atlas scheme' {
+        $atlasSettings = @($power.settings | Where-Object { -not $_.beyondAtlas })
+        $atlasSettings.Count | Should -Be 27
+    }
+
+    It 'marks exactly the two settings that differ from Ultimate Performance' {
+        $overrides = @($power.settings | Where-Object { $_.atlasOverride })
+        $overrides.Count | Should -Be 2
+        @($overrides | ForEach-Object { $_.setting }) | Should -Contain '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'
+        @($overrides | ForEach-Object { $_.setting }) | Should -Contain '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e'
+    }
+
+    It 'matches the Atlas values for the two overrides' {
+        $usb = $power.settings | Where-Object { $_.setting -eq '48e6b7a6-50f5-4782-a5d4-53bb8f07e226' }
+        $usb.ac | Should -Be 0
+        $usb.dc | Should -Be 1
+
+        $display = $power.settings | Where-Object { $_.setting -eq '3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e' }
+        $display.ac | Should -Be 0
+        $display.dc | Should -Be 180
+    }
+
+    It 'keeps the CPU-idle divergence gated behind its own group and flagged' {
+        # Atlas leaves CPU idle ENABLED. Ours disables it, so it must be both
+        # independently switchable and labelled as a divergence.
+        $idle = $power.settings | Where-Object { $_.setting -eq '5d76a2ca-e8c0-402f-a133-2158492d58ad' }
+        $idle | Should -Not -BeNullOrEmpty
+        $idle.group | Should -Be 'disable_cpu_idle'
+        $idle.beyondAtlas | Should -BeTrue
+    }
+
     It 'gives every power setting a subgroup, GUID, and AC/DC value' {
         foreach ($setting in $power.settings) {
-            $setting.subgroup | Should -Not -BeNullOrEmpty
+            $setting.subgroup | Should -Match '^[0-9a-fA-F-]{36}$'
             $setting.setting  | Should -Match '^[0-9a-fA-F-]{36}$'
             $setting.name     | Should -Not -BeNullOrEmpty
             $setting.PSObject.Properties.Name | Should -Contain 'ac'
@@ -513,5 +548,39 @@ Describe 'Profile engine functional behaviour' {
         $bad = $script:EngineProfile | ConvertTo-Json -Depth 20 | ConvertFrom-Json
         $bad.PSObject.Properties.Remove('services')
         { Test-GamingProfile -Profile $bad } | Should -Throw '*missing required key*'
+    }
+
+    It 'refuses to stage an image with no runtime installers when runtimes are enabled' {
+        # Guards the "ISO ships looking fine but without the runtimes" failure mode.
+        $emptySource = Join-Path $script:StagingRoot 'empty-runtimes'
+        New-Item -ItemType Directory -Force -Path $emptySource | Out-Null
+
+        $withRuntimes = Resolve-GamingGroups -Profile $script:EngineProfile `
+            -Overrides @{ install_game_runtimes = $true }
+
+        {
+            New-GamingFirstBootPayload -Profile $script:EngineProfile -Groups $withRuntimes `
+                -ScratchDir (Join-Path $script:StagingRoot 'scratch-noruntimes') `
+                -ScriptRoot (Join-Path $repoRoot 'scripts') `
+                -RuntimeSource $emptySource -HagsMode 'on'
+        } | Should -Throw '*no runtime installers*'
+    }
+
+    It 'copies a populated runtime staging directory into the image' {
+        $source = Join-Path $script:StagingRoot 'good-runtimes'
+        New-Item -ItemType Directory -Force -Path $source | Out-Null
+        # A dummy file is enough - the staging step only checks that installers exist.
+        Set-Content -LiteralPath (Join-Path $source 'vc_redist.x64.exe') -Value 'stub' -Encoding ASCII
+
+        $withRuntimes = Resolve-GamingGroups -Profile $script:EngineProfile `
+            -Overrides @{ install_game_runtimes = $true }
+        $scratch = Join-Path $script:StagingRoot 'scratch-withruntimes'
+
+        New-GamingFirstBootPayload -Profile $script:EngineProfile -Groups $withRuntimes `
+            -ScratchDir $scratch -ScriptRoot (Join-Path $repoRoot 'scripts') `
+            -RuntimeSource $source -HagsMode 'on' | Out-Null
+
+        Test-Path -LiteralPath (Join-Path $scratch 'Windows\Tiny11Gaming\runtimes\vc_redist.x64.exe') |
+            Should -BeTrue
     }
 }
