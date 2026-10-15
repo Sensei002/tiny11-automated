@@ -26,7 +26,7 @@
 
 $script:GamingLogFile = $null
 $script:GamingProfileDir = $null
-$script:GamingStats = @{ registry = 0; services = 0; appx = 0; packages = 0; features = 0; runtimes = 0 }
+$script:GamingStats = @{ registry = 0; services = 0; appx = 0; packages = 0; features = 0 }
 
 #---------[ Logging / helpers ]---------#
 
@@ -126,7 +126,7 @@ function Test-GamingProfile {
     $requiredKeys = @(
         'schemaVersion', 'profile', 'hivePrefixes', 'defaultGroups',
         'registry', 'services', 'appxPrefixes', 'systemPackages',
-        'optionalFeatures', 'runtimeDownloads', 'revert'
+        'optionalFeatures', 'revert'
     )
     $present = @($Profile.PSObject.Properties.Name)
     foreach ($key in $requiredKeys) {
@@ -159,7 +159,7 @@ function Test-GamingProfile {
         }
     }
 
-    foreach ($section in @('services', 'appxPrefixes', 'systemPackages', 'optionalFeatures', 'runtimeDownloads')) {
+    foreach ($section in @('services', 'appxPrefixes', 'systemPackages', 'optionalFeatures')) {
         $i = 0
         foreach ($entry in $Profile.$section) {
             $i++
@@ -500,83 +500,6 @@ function Invoke-GamingOptionalFeatureRemoval {
     Write-GamingLog "Optional feature removal: $removed feature(s) removed"
 }
 
-#---------[ Runtime payload ]---------#
-
-function Get-GamingRuntimePayload {
-    # Downloads the runtime installers that ship inside the image.
-    #
-    # This is deliberately fatal by default. A silent failure here produces an ISO that
-    # looks fine but is missing the runtimes, which the user only discovers after
-    # installing. The builder calls this EARLY (before the Windows ISO is downloaded)
-    # so a network problem costs seconds, not the whole build.
-    param(
-        $Profile,
-        [hashtable]$Groups,
-        [string]$Destination,
-        [bool]$FailOnError = $true,
-        [int]$MinimumBytes = 102400
-    )
-
-    if (-not (Test-GamingGroupEnabled -Groups $Groups -Name 'install_game_runtimes')) {
-        Write-GamingLog "Game runtime download skipped (group disabled)"
-        return
-    }
-
-    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-
-    # Older PowerShell defaults to TLS 1.0, which aka.ms and download.microsoft.com reject.
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    } catch {
-        Write-GamingLog "Could not force TLS 1.2: $_" 'WARN'
-    }
-
-    $downloaded = 0
-    $failures = @()
-
-    foreach ($runtime in $Profile.runtimeDownloads) {
-        $group = Get-GamingProp $runtime 'group'
-        if (-not (Test-GamingGroupEnabled -Groups $Groups -Name $group)) { continue }
-
-        $url = Get-GamingProp $runtime 'url'
-        $file = Get-GamingProp $runtime 'file'
-        $note = Get-GamingProp $runtime 'note'
-        $outFile = Join-Path $Destination $file
-
-        try {
-            Write-GamingLog "  downloading $file ($note)"
-            Invoke-WebRequest -Uri $url -OutFile $outFile -UseBasicParsing -TimeoutSec 300
-
-            $bytes = (Get-Item -LiteralPath $outFile).Length
-            if ($bytes -lt $MinimumBytes) {
-                # A 404 or an error page saved under an .exe name is the classic silent
-                # failure here, so reject anything implausibly small.
-                throw "downloaded file is only $bytes bytes - expected at least $MinimumBytes"
-            }
-
-            $sizeMB = [math]::Round($bytes / 1MB, 1)
-            Write-GamingLog "  got $file (${sizeMB} MB)"
-            $downloaded++
-        } catch {
-            Remove-Item -LiteralPath $outFile -Force -ErrorAction SilentlyContinue
-            $failures += "$file : $($_.Exception.Message)"
-            Write-GamingLog "  FAILED $file : $($_.Exception.Message)" 'ERROR'
-        }
-    }
-
-    $script:GamingStats.runtimes = $downloaded
-
-    if ($failures.Count -gt 0) {
-        $message = "Could not bundle $($failures.Count) game runtime(s): " + ($failures -join ' | ')
-        if ($FailOnError) {
-            throw $message
-        }
-        Write-GamingLog $message 'WARN'
-    }
-
-    Write-GamingLog "Game runtimes bundled: $downloaded"
-}
-
 #---------[ Manifest ]---------#
 
 function New-GamingManifest {
@@ -677,13 +600,11 @@ function New-GamingFirstBootPayload {
         [hashtable]$Groups,
         [string]$ScratchDir,
         [string]$ScriptRoot,
-        [string]$HagsMode = 'on',
-        [string]$RuntimeSource
+        [string]$HagsMode = 'on'
     )
 
     $gamingDir = Join-Path $ScratchDir 'Windows\Tiny11Gaming'
-    $runtimeDir = Join-Path $gamingDir 'runtimes'
-    New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $gamingDir | Out-Null
 
     Write-GamingLog "Injecting first-boot payload into $gamingDir"
 
@@ -732,35 +653,9 @@ function New-GamingFirstBootPayload {
     New-GamingManifest -Profile $Profile -Groups $Groups `
         -Destination (Join-Path $gamingDir 'GAMING_PROFILE.md') -HagsMode $HagsMode
 
-    # Runtime installers. The builder normally downloads these up front and hands over a
-    # staging directory; the fallback download keeps this module usable standalone.
-    if (Test-GamingGroupEnabled -Groups $Groups -Name 'install_game_runtimes') {
-        if ($RuntimeSource -and (Test-Path -LiteralPath $RuntimeSource)) {
-            # Copy-Item with a wildcard errors on an empty directory, so count first and
-            # let the verification below produce the clear message instead.
-            $sourceItems = @(Get-ChildItem -Path $RuntimeSource -File -ErrorAction SilentlyContinue)
-            if ($sourceItems.Count -gt 0) {
-                Copy-Item -Path (Join-Path $RuntimeSource '*') -Destination $runtimeDir -Force -Recurse
-                Write-GamingLog "  copied $($sourceItems.Count) runtime file(s) from $RuntimeSource"
-            } else {
-                Write-GamingLog "  runtime staging directory is empty: $RuntimeSource" 'WARN'
-            }
-        } else {
-            Get-GamingRuntimePayload -Profile $Profile -Groups $Groups -Destination $runtimeDir
-        }
-
-        # Never emit an ISO whose runtime folder is empty - that is precisely the
-        # "not out of the box" failure this step exists to prevent.
-        $staged = @(Get-ChildItem -Path $runtimeDir -Filter '*.exe' -File -ErrorAction SilentlyContinue)
-        if ($staged.Count -eq 0) {
-            throw "install_game_runtimes is enabled but no runtime installers were staged into the image"
-        }
-        Write-GamingLog "  runtime payload verified: $($staged.Count) installer(s)"
-    }
-
     # SetupComplete.cmd runs once as SYSTEM after setup finishes and before the first
     # logon. It is the only offline-injectable hook that is guaranteed to be elevated,
-    # which is what powercfg / bcdedit / runtime installers need. Windows deletes it
+    # which is what powercfg / bcdedit / per-adapter NIC work needs. Windows deletes it
     # after it runs, so it is naturally one-shot.
     $setupScriptsDir = Join-Path $ScratchDir 'Windows\Setup\Scripts'
     New-Item -ItemType Directory -Force -Path $setupScriptsDir | Out-Null

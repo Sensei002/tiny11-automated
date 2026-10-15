@@ -143,11 +143,6 @@ on:
         type: boolean
         required: false
         default: true
-      install_game_runtimes:
-        description: 'Gaming: Bundle and install VC++ 2015-2022, DirectX 9.0c and .NET 8 Desktop Runtime at first boot. Adds ~150MB and a few minutes to the build.'
-        type: boolean
-        required: false
-        default: true
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -226,7 +221,6 @@ jobs:
             Write-Output "AppX prefixes:    $($profile.appxPrefixes.Count)"
             Write-Output "System packages:  $($profile.systemPackages.Count)"
             Write-Output "Optional features:$($profile.optionalFeatures.Count)"
-            Write-Output "Runtime payloads: $($profile.runtimeDownloads.Count)"
           } catch {
             Write-Error "Gaming profile JSON is invalid: $_"
             exit 1
@@ -281,8 +275,8 @@ jobs:
           $totalGB = [math]::Round($disk.Used / 1GB + $disk.Free / 1GB, 2)
           Write-Output "Disk C: ${freeGB}GB free / ${totalGB}GB total"
 
-          if ($freeGB -lt 30) {
-            Write-Error "Insufficient disk space. At least 30GB required for a Core-Gaming build (runtime payloads add ~150MB), found ${freeGB}GB"
+          if ($freeGB -lt 25) {
+            Write-Error "Insufficient disk space. At least 25GB required for a Core-Gaming build, found ${freeGB}GB"
             exit 1
           }
 
@@ -478,7 +472,6 @@ jobs:
             disable_fso                 = ("${{ github.event.inputs.disable_fso }}"                 -eq 'true')
             disable_game_mode           = ("${{ github.event.inputs.disable_game_mode }}"           -eq 'true')
             disable_printing            = ("${{ github.event.inputs.disable_printing }}"            -eq 'true')
-            install_game_runtimes       = ("${{ github.event.inputs.install_game_runtimes }}"       -eq 'true')
           }
 
           $hagsMode = "${{ github.event.inputs.hags }}"
@@ -565,7 +558,6 @@ jobs:
               Write-Output "AppX packages removed:   $($gamingInfo.counts.appx)"
               Write-Output "System packages removed: $($gamingInfo.counts.packages)"
               Write-Output "Features removed:        $($gamingInfo.counts.features)"
-              Write-Output "Runtimes bundled:        $($gamingInfo.counts.runtimes)"
             } catch {
               Write-Output "Could not parse $gamingInfoPath : $_"
             }
@@ -892,7 +884,6 @@ jobs:
             | Fullscreen Optimizations off | ${{ github.event.inputs.disable_fso == 'true' && '✅' || '❌' }} |
             | Game Mode off | ${{ github.event.inputs.disable_game_mode == 'true' && '✅' || '❌' }} |
             | Printing disabled | ${{ github.event.inputs.disable_printing == 'true' && '✅' || '❌' }} |
-            | Game runtimes bundled | ${{ github.event.inputs.install_game_runtimes == 'true' && '✅' || '❌' }} |
 
             ### ⚠️ Security Notice
             This image disables VBS / Memory Integrity, Credential Guard and the

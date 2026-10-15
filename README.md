@@ -37,7 +37,6 @@
 - ⚡ **AtlasOS-style power scheme**: no CPU idle (C-State 0), no core parking, no USB/PCIe power saving
 - 🎯 **Latency-first tweaks**: Game Mode off, Fullscreen Optimizations off, MPO off, mouse acceleration off
 - 🔓 **Security mitigations off**: VBS / Memory Integrity / Credential Guard / Spectre-Meltdown
-- 📦 **Game runtimes bundled**: VC++ 2015–2022, DirectX 9.0c, .NET 8 Desktop — installed at first boot
 - 🔁 **Reversible**: ships an undo script and a per-build manifest inside the ISO
 - 📖 Full details in **[GAMING.md](GAMING.md)**
 
@@ -260,7 +259,9 @@ Siege on a CPU-bound machine.
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
-| **Runtimes** | VC++ 2015–2022 (x64 + x86), DirectX 9.0c, .NET 8 Desktop — downloaded and verified at build time, embedded in the ISO, installed during Setup before OOBE |
+
+Game runtimes (VC++, DirectX 9.0c, .NET Desktop) are deliberately **not** bundled — see
+[GAMING.md](GAMING.md#game-runtimes) for why and what to install yourself.
 
 ### How to build it
 
@@ -276,7 +277,7 @@ can dial any of it back per build.
 
 # Dial specific groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
-    -GamingGroups @{ disable_security_mitigations = $false; install_game_runtimes = $false }
+    -GamingGroups @{ disable_security_mitigations = $false; disable_mpo = $false }
 ```
 
 ### Customising it
@@ -386,7 +387,6 @@ atlas_power_scheme            disable_cpu_idle          disable_security_mitigat
 remove_xbox_gaming_stack      strip_background_noise    disable_fast_startup
 network_latency_tweaks        disable_mpo               latency_input_tweaks
 disable_fso                   disable_game_mode         disable_printing
-install_game_runtimes
 ```
 
 See **[GAMING.md](GAMING.md)** for what each group does and what it breaks.
@@ -834,7 +834,6 @@ latency_input_tweaks:       # Mouse acceleration off, DXGI flip model on
 disable_fso:                # Fullscreen Optimizations off
 disable_game_mode:          # Game Mode off (AtlasOS default)
 disable_printing:           # Print services + features removed
-install_game_runtimes:      # VC++ / DirectX 9.0c / .NET 8 bundled
 ```
 
 The build also validates `config/gaming_profile.json` and parses

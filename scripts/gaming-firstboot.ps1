@@ -10,7 +10,6 @@
       * powercfg   - the scheme GUID is generated per machine
       * bcdedit    - the BCD store is not part of install.wim
       * NIC tweaks - adapter GUIDs do not exist until the driver is enumerated
-      * runtimes   - VC++ / DirectX / .NET installers must actually run
 
     Per-user settings (mouse, FSO, GPU preference) are NOT here - they are written into
     the Default user hive by the builder, so every new profile inherits them.
@@ -18,13 +17,10 @@
     Safe to re-run manually: pass -Force to ignore the completion marker.
 
 .PARAMETER GamingDir
-    Directory holding this script, the runtime installers and the power config.
+    Directory holding this script and the power config.
 
 .PARAMETER Force
     Re-run even if the completion marker exists.
-
-.PARAMETER KeepInstallers
-    Do not delete the runtime installers after installing them.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File C:\Windows\Tiny11Gaming\gaming-firstboot.ps1 -Force
@@ -37,8 +33,7 @@
 [CmdletBinding()]
 param(
     [string]$GamingDir = (Join-Path $env:WINDIR 'Tiny11Gaming'),
-    [switch]$Force,
-    [switch]$KeepInstallers
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Continue'
@@ -209,63 +204,6 @@ function Set-GamingNetworkTweaks {
     Write-Log "  NIC power management disabled on $nics adapter(s)"
 }
 
-#---------[ Game runtimes ]---------#
-
-function Install-GamingRuntimes {
-    param([string]$RuntimeDir, [switch]$Keep)
-
-    if (-not (Test-Path -LiteralPath $RuntimeDir)) {
-        Write-Log "No runtime payload directory - skipping" 'WARN'
-        return
-    }
-
-    $installers = Get-ChildItem -Path $RuntimeDir -Filter '*.exe' -File -ErrorAction SilentlyContinue
-    if (-not $installers -or $installers.Count -eq 0) {
-        Write-Log "No runtime installers bundled" 'WARN'
-        return
-    }
-
-    foreach ($installer in $installers) {
-        $name = $installer.Name
-        try {
-            if ($name -like 'directx*') {
-                # DirectX June 2010 ships as a self-extracting archive, not an installer.
-                $extractDir = Join-Path $RuntimeDir 'dx-redist'
-                if (Test-Path -LiteralPath $extractDir) {
-                    Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-                }
-                Write-Log "  extracting $name"
-                Start-Process -FilePath $installer.FullName -ArgumentList "/Q /T:`"$extractDir`"" -Wait -NoNewWindow
-
-                $dxSetup = Join-Path $extractDir 'DXSETUP.exe'
-                if (Test-Path -LiteralPath $dxSetup) {
-                    Write-Log "  running DXSETUP.exe /silent"
-                    Start-Process -FilePath $dxSetup -ArgumentList '/silent' -Wait -NoNewWindow
-                } else {
-                    Write-Log "  DXSETUP.exe not found after extraction" 'WARN'
-                }
-            } else {
-                Write-Log "  installing $name"
-                Start-Process -FilePath $installer.FullName -ArgumentList '/install /quiet /norestart' -Wait -NoNewWindow
-            }
-        } catch {
-            Write-Log "  FAILED $name : $_" 'WARN'
-            $script:Failures++
-        }
-    }
-
-    if (-not $Keep) {
-        # Installers are ~150 MB; reclaim it now that they have been consumed.
-        Get-ChildItem -Path $RuntimeDir -Filter '*.exe' -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        $dxDir = Join-Path $RuntimeDir 'dx-redist'
-        if (Test-Path -LiteralPath $dxDir) {
-            Remove-Item -LiteralPath $dxDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        Write-Log "Runtime installers removed (pass -KeepInstallers to retain them)"
-    }
-}
-
 #---------[ Main ]---------#
 
 Write-Log "=============================================="
@@ -331,11 +269,6 @@ try {
     if (Test-GroupEnabled 'network_latency_tweaks') {
         Write-Section 'Network latency'
         Set-GamingNetworkTweaks
-    }
-
-    if (Test-GroupEnabled 'install_game_runtimes') {
-        Write-Section 'Game runtimes'
-        Install-GamingRuntimes -RuntimeDir (Join-Path $GamingDir 'runtimes') -Keep:$KeepInstallers
     }
 
     Write-Section 'Summary'

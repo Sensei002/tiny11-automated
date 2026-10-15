@@ -61,7 +61,7 @@ Describe 'Gaming profile JSON' {
         $required = @(
             'schemaVersion', 'profile', 'hivePrefixes', 'defaultGroups',
             'registry', 'services', 'appxPrefixes', 'systemPackages',
-            'optionalFeatures', 'runtimeDownloads', 'revert'
+            'optionalFeatures', 'revert'
         )
         $present = @($profile.PSObject.Properties.Name)
         foreach ($key in $required) {
@@ -90,7 +90,6 @@ Describe 'Gaming profile JSON' {
         foreach ($entry in $profile.appxPrefixes)      { $known | Should -Contain $entry.group }
         foreach ($entry in $profile.systemPackages)    { $known | Should -Contain $entry.group }
         foreach ($entry in $profile.optionalFeatures)  { $known | Should -Contain $entry.group }
-        foreach ($entry in $profile.runtimeDownloads)  { $known | Should -Contain $entry.group }
     }
 
     It 'gives every registry entry a path and a type' {
@@ -104,13 +103,6 @@ Describe 'Gaming profile JSON' {
         foreach ($entry in $profile.services) {
             $entry.name | Should -Not -BeNullOrEmpty
             $entry.start | Should -BeIn @(0, 1, 2, 3, 4)
-        }
-    }
-
-    It 'gives every runtime download a url and a file name' {
-        foreach ($entry in $profile.runtimeDownloads) {
-            $entry.url  | Should -Match '^https://'
-            $entry.file | Should -Match '\.exe$'
         }
     }
 
@@ -286,7 +278,7 @@ Describe 'Gaming profile engine' {
             'Resolve-GamingGroups', 'Invoke-GamingRegistryTweaks',
             'Invoke-GamingServiceTweaks', 'Set-GamingHagsMode',
             'Invoke-GamingAppxRemoval', 'Invoke-GamingSystemPackageRemoval',
-            'Invoke-GamingOptionalFeatureRemoval', 'Get-GamingRuntimePayload',
+            'Invoke-GamingOptionalFeatureRemoval',
             'New-GamingFirstBootPayload', 'New-GamingManifest', 'Write-GamingBuildInfo'
         )) {
             $content | Should -Match ("function\s+$([regex]::Escape($fn))\b")
@@ -413,7 +405,7 @@ Describe 'Core-Gaming workflow' {
             'remove_xbox_gaming_stack', 'strip_background_noise', 'instant_windows',
             'disable_fast_startup',
             'network_latency_tweaks', 'disable_mpo', 'latency_input_tweaks', 'disable_fso',
-            'disable_game_mode', 'disable_printing', 'install_game_runtimes'
+            'disable_game_mode', 'disable_printing'
         )) {
             $workflowRaw | Should -Match "(?m)^\s{6}$([regex]::Escape($input)):"
         }
@@ -469,9 +461,9 @@ Describe 'Profile engine functional behaviour' {
         $script:ScratchDir = Join-Path $script:StagingRoot 'scratchdir'
         New-Item -ItemType Directory -Force -Path (Join-Path $script:ScratchDir 'Windows\System32\config') | Out-Null
 
-        # install_game_runtimes stays off so the test never touches the network.
+        # Drive a real override so the group gating is exercised.
         $script:TestGroups = Resolve-GamingGroups -Profile $script:EngineProfile `
-            -Overrides @{ install_game_runtimes = $false }
+            -Overrides @{ disable_mpo = $false }
 
         New-GamingFirstBootPayload -Profile $script:EngineProfile -Groups $script:TestGroups `
             -ScratchDir $script:ScratchDir -ScriptRoot (Join-Path $repoRoot 'scripts') -HagsMode 'on' |
@@ -495,8 +487,8 @@ Describe 'Profile engine functional behaviour' {
     }
 
     It 'honours group overrides without disturbing other groups' {
-        $script:TestGroups['install_game_runtimes'] | Should -BeFalse
-        $script:TestGroups['disable_game_mode']     | Should -BeTrue
+        $script:TestGroups['disable_mpo']       | Should -BeFalse
+        $script:TestGroups['disable_game_mode'] | Should -BeTrue
     }
 
     It 'ignores an unknown group override instead of throwing' {
@@ -526,7 +518,7 @@ Describe 'Profile engine functional behaviour' {
     It 'records the resolved group flags for the target machine' {
         $groupsFile = Join-Path $script:GamingDir 'gaming_groups.json'
         $parsed = Get-Content -LiteralPath $groupsFile -Raw | ConvertFrom-Json
-        $parsed.groups.install_game_runtimes | Should -BeFalse
+        $parsed.groups.disable_mpo | Should -BeFalse
         $parsed.hagsMode | Should -Be 'on'
     }
 
@@ -548,39 +540,5 @@ Describe 'Profile engine functional behaviour' {
         $bad = $script:EngineProfile | ConvertTo-Json -Depth 20 | ConvertFrom-Json
         $bad.PSObject.Properties.Remove('services')
         { Test-GamingProfile -Profile $bad } | Should -Throw '*missing required key*'
-    }
-
-    It 'refuses to stage an image with no runtime installers when runtimes are enabled' {
-        # Guards the "ISO ships looking fine but without the runtimes" failure mode.
-        $emptySource = Join-Path $script:StagingRoot 'empty-runtimes'
-        New-Item -ItemType Directory -Force -Path $emptySource | Out-Null
-
-        $withRuntimes = Resolve-GamingGroups -Profile $script:EngineProfile `
-            -Overrides @{ install_game_runtimes = $true }
-
-        {
-            New-GamingFirstBootPayload -Profile $script:EngineProfile -Groups $withRuntimes `
-                -ScratchDir (Join-Path $script:StagingRoot 'scratch-noruntimes') `
-                -ScriptRoot (Join-Path $repoRoot 'scripts') `
-                -RuntimeSource $emptySource -HagsMode 'on'
-        } | Should -Throw '*no runtime installers*'
-    }
-
-    It 'copies a populated runtime staging directory into the image' {
-        $source = Join-Path $script:StagingRoot 'good-runtimes'
-        New-Item -ItemType Directory -Force -Path $source | Out-Null
-        # A dummy file is enough - the staging step only checks that installers exist.
-        Set-Content -LiteralPath (Join-Path $source 'vc_redist.x64.exe') -Value 'stub' -Encoding ASCII
-
-        $withRuntimes = Resolve-GamingGroups -Profile $script:EngineProfile `
-            -Overrides @{ install_game_runtimes = $true }
-        $scratch = Join-Path $script:StagingRoot 'scratch-withruntimes'
-
-        New-GamingFirstBootPayload -Profile $script:EngineProfile -Groups $withRuntimes `
-            -ScratchDir $scratch -ScriptRoot (Join-Path $repoRoot 'scripts') `
-            -RuntimeSource $source -HagsMode 'on' | Out-Null
-
-        Test-Path -LiteralPath (Join-Path $scratch 'Windows\Tiny11Gaming\runtimes\vc_redist.x64.exe') |
-            Should -BeTrue
     }
 }

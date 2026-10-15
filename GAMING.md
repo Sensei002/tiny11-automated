@@ -46,7 +46,7 @@ skips that group entirely; it does not half-apply.
 
 # Dial a few groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
-    -GamingGroups @{ disable_security_mitigations = $false; install_game_runtimes = $false }
+    -GamingGroups @{ disable_security_mitigations = $false; disable_mpo = $false }
 
 # Use a different profile file
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -GamingProfileFile .\my-profile.json
@@ -94,7 +94,6 @@ Group names match the workflow input names exactly.
 | `disable_fast_startup` | Hibernation and Fast Startup off |
 | `disable_printing` | Print services disabled **and** the printing optional features removed from the image |
 | `remove_xbox_gaming_stack` | Xbox Live Auth, Xbox Game Save, Xbox Networking, Xbox Accessory Management, Gaming Services and Gaming Services Network all disabled; Xbox AppX packages removed |
-| `install_game_runtimes` | VC++ 2015–2022 (x64 + x86), DirectX 9.0c (June 2010) and .NET 8 Desktop Runtime — downloaded at build time, verified, embedded in the ISO, and installed during Setup before OOBE. See [Game runtimes](#game-runtimes) |
 
 Plus `-HagsMode on|off|leave` for Hardware Accelerated GPU Scheduling.
 
@@ -250,52 +249,24 @@ slow to exit. Windows is very patient by default.
 
 ## Game runtimes
 
-`install_game_runtimes` bundles three things into the image:
+**Not bundled, on purpose.** VC++ 2015–2022, DirectX 9.0c and the .NET Desktop Runtime
+are deliberately left out. Install them yourself after setup, or let your game launcher
+do it.
 
-| Runtime | Why |
+They could not be integrated into the image at build time anyway: DISM's `/Add-Package`
+accepts only `.cab`, `.msu` and `.appx`, and Microsoft does not ship these runtimes in
+those formats. The only alternatives were "run the installers during Setup" or
+"hand-roll image surgery on the mounted WIM" — neither is worth the ISO size, the build
+time, and the untestable failure modes for something most launchers handle themselves.
+
+If a game complains about a missing `VCRUNTIME140.dll`, `d3dx9_43.dll`, or a .NET
+runtime, install the redistributable once:
+
+| Runtime | Where to get it |
 |---|---|
-| Visual C++ 2015–2022 (x64 + x86) | Most modern games and launchers refuse to start without it |
-| DirectX 9.0c End-User Runtime (June 2010) | Legacy `d3dx9_*`, `d3dcompiler_*`, `xinput1_3`, `xaudio2_*` — needed by a lot of older titles |
-| .NET 8 Desktop Runtime (x64) | Required by a growing number of launchers and tools |
-
-### Where they are installed, and when
-
-The installers are **downloaded at build time, verified, and embedded in the ISO**. They
-are then installed by `Windows\Setup\Scripts\SetupComplete.cmd`, which Windows runs **as
-SYSTEM during Setup — before OOBE and before the first logon**. You never see it: by the
-time the desktop appears, everything is already installed. There is no post-install step.
-
-Two properties are guaranteed:
-
-- **The download is fatal.** If a runtime cannot be fetched — or comes back implausibly
-  small, which is what a 404 page saved as `.exe` looks like — the build stops. It stops
-  *before* the Windows ISO is downloaded, so a network problem costs seconds rather than
-  an hour. An ISO can never ship looking complete but missing the runtimes.
-- **The payload is verified inside the image** before the ISO is written. An empty
-  runtime folder fails the build.
-
-### Why they are not "baked in" at build time
-
-A fair thing to expect, so here is the honest answer.
-
-**MSI/EXE installers cannot be integrated into an offline image.** DISM's `/Add-Package`
-accepts only `.cab`, `.msu` and `.appx` — Microsoft does not ship these runtimes in those
-formats. The earliest point at which they can genuinely be *installed* is during Setup,
-which is what this does.
-
-It is possible to go further for two of the three, by extracting the payloads and copying
-files straight into the image:
-
-| Runtime | Bakeable by file copy? | Why |
-|---|---|---|
-| VC++ 2015–2022 | **Yes** | Its DLLs (`msvcp140.dll`, `vcruntime140.dll`, …) go directly into `System32` / `SysWOW64`, not WinSxS. Copying them in works. |
-| DirectX 9.0c | **Yes** | Same — `d3dx9_*`, `d3dcompiler_*` and `xinput1_3` live in `System32` / `SysWOW64`. |
-| .NET 8 Desktop Runtime | **No** | It is not a set of DLLs in `System32`. It is a directory tree under `C:\Program Files\dotnet\` plus `PATH` and registry registration for host resolution. Copying files alone does not produce a working install. |
-
-So a "fully baked" variant would cover two of the three, and would replace supported
-installer execution with hand-rolled image surgery that cannot be validated without
-booting the result. That trade-off has deliberately not been taken — it is a change worth
-making only on purpose, not by default.
+| Visual C++ 2015–2022 | `https://aka.ms/vs/17/release/vc_redist.x64.exe` — and `vc_redist.x86.exe` for 32-bit games |
+| DirectX 9.0c (June 2010) | Microsoft's "DirectX End-User Runtime" download |
+| .NET Desktop Runtime | `https://dotnet.microsoft.com/download/dotnet` |
 
 ---
 
@@ -437,9 +408,9 @@ Order of operations during a build:
 At first boot, `Windows\Setup\Scripts\SetupComplete.cmd` runs
 `gaming-firstboot.ps1` **as SYSTEM, before the first logon**. That hook is used because
 the power scheme GUID is machine-specific, the BCD store is not part of `install.wim`,
-network adapters do not exist until drivers enumerate, and runtime installers have to
-actually execute. Per-user settings do not go there — they are written into the Default
-user hive offline so every new profile inherits them.
+and network adapters do not exist until drivers enumerate. Per-user settings do not go
+there — they are written into the Default user hive offline so every new profile
+inherits them.
 
 Everything is best-effort: a missing service or an unavailable DISM feature logs a
 warning and continues. A half-applied gaming profile beats a failed 90-minute build.
