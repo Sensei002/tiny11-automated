@@ -25,6 +25,10 @@ scripts/nano11.iso
 *.log
 *.tmp
 
+# NVIDIA debloated driver build artifacts
+nvidia-driver/
+nvidia-driver-work/
+
 # Checksums and Verification Files (generated artifacts)
 *.sha256
 *.md5

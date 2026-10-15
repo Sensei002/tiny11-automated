@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "schemaVersion": "1.0.0",
+  "profile": "nvidia-debloated-driver",
+  "title": "NVIDIA Debloated Driver Injection",
+  "description": "Builds a debloated NVIDIA display driver with NVCleanstall and prepares it for offline injection into a Tiny11 Core-Gaming ISO. Mirrors the exact component selection and Installation Tweaks shown in the reference screenshots (NVCleanstall v1.19.0). The primary path drives the NVCleanstall GUI; if that fails, a deterministic fallback downloads the official NVIDIA package, prunes it to the Display Driver, applies the same tweaks as INF edits and re-signs it.",
+  "author": "kelexine (https://github.com/kelexine)",
+
+  "nvcleanstall": {
+    "version": "1.19.0",
+    "downloadUrl": "https://closest-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",
+    "mirrors": [
+      "https://us1-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",
+      "https://uk1-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",
+      "https://nl1-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",
+      "https://de1-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe",
+      "https://sg1-dl.techpowerup.com/files/NVCleanstall_1.19.0.exe"
+    ],
+    "sha256": "9DD36EF956AF927CF41FA441F91B329A7973E13965E4E7D70E6FA9C1DF1CADE6",
+    "processName": "NVCleanstall",
+    "windowTitleFragment": "NVCleanstall"
+  },
+
+  "components": {
+    "keep": [
+      "Display Driver (required)"
+    ],
+    "remove": [
+      "Legacy Control Panel",
+      "HD Audio via HDMI",
+      "Microsoft Visual C 2017 Runtimes",
+      "PhysX",
+      "USB-C Driver",
+      "FrameView SDK",
+      "Quadro View",
+      "Virtual Audio",
+      "Telemetry",
+      "NV Platform Controllers",
+      "NVIDIA DLSSR",
+      "NVIDIA App",
+      "NV Container",
+      "ShadowPlay",
+      "NV Backend",
+      "NVIDIA App MessageBus"
+    ],
+    "note": "Everything except Display Driver (required) is unchecked, matching the reference screenshot exactly."
+  },
+
+  "tweaks": {
+    "disable_installer_telemetry_advertising": true,
+    "unattended_express_install": true,
+    "allow_automatic_reboot": true,
+    "perform_clean_installation": true,
+    "add_hardware_support": false,
+    "enable_dlss_indicator": false,
+    "disable_mpo": false,
+    "disable_ansel": true,
+    "show_expert_tweaks": true,
+    "disable_driver_telemetry": true,
+    "disable_nvidia_container": false,
+    "disable_hd_audio_sleep_timer": true,
+    "enable_msi": true,
+    "interrupt_policy": "Default",
+    "interrupt_priority": "Default",
+    "disable_hdcp": true,
+    "nvenc_session_limit_patch": false,
+    "rebuild_digital_signature": true,
+    "easy_anticheat_compatible": true,
+    "auto_accept_unsigned_warning": true
+  },
+
+  "fallback": {
+    "enabled": true,
+    "driverUrlTemplate": "https://us.download.nvidia.com/Windows/{version}/{version}-{branch}-win10-win11-64bit-international-dch-whql.exe",
+    "branchCandidates": [
+      "desktop",
+      "notebook"
+    ],
+    "keepFolders": [
+      "Display.Driver"
+    ],
+    "displayInf": "nv_dispi.inf",
+    "sevenZipPath": "C:\\Program Files\\7-Zip\\7z.exe",
+    "signing": {
+      "subject": "CN=Tiny11 NVIDIA Driver Rebuild",
+      "rebuildCatalog": true,
+      "note": "The tweaks below modify the INF, so NVIDIA's catalog signature no longer matches. The rebuilt driver is re-signed with a locally generated certificate; that certificate is trusted inside the image so the driver loads without the unsigned-driver prompt."
+    }
+  },
+
+  "injection": {
+    "targetImage": "install.wim",
+    "forceUnsigned": true,
+    "trustCertificateInImage": true,
+    "note": "Drivers are added to the offline install.wim DriverStore before WinSxS optimization so PnP installs them during OOBE."
+  },
+
+  "gui": {
+    "stepTimeoutSeconds": 180,
+    "actionDelayMs": 900,
+    "navigationDelayMs": 1500,
+    "captureScreenshots": true,
+    "screenshotDir": "nvidia-gui-screenshots",
+    "note": "Best-effort control-message automation of the NVCleanstall v1.19.0 wizard. Any failure falls through to the deterministic fallback."
+  }
+}

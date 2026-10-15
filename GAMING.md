@@ -14,6 +14,7 @@ Rainbow Six Siege on a CPU-bound machine.
 ## Contents
 
 - [Building it](#building-it)
+- [Optional: NVIDIA driver injection](#optional-nvidia-driver-injection)
 - [What gets applied](#what-get-applied)
 - [The power scheme](#the-power-scheme)
 - [Instant window response](#instant-window-response)
@@ -54,6 +55,63 @@ skips that group entirely; it does not half-apply.
 
 `-GamingProfile` is opt-in. A plain Core build is completely unaffected — the profile
 engine is only dot-sourced when the switch is present.
+
+---
+
+## Optional: NVIDIA driver injection
+
+If the target machine has an NVIDIA GPU, the Core-Gaming workflow can bake a
+**debloated NVIDIA display driver** straight into the ISO, so a fresh install already
+has the driver — no separate driver install, no GeForce Experience, no telemetry.
+
+Set the **`nvidia_driver_version`** input to the version you want (e.g. `566.36`, or
+`latest`). **Leave it blank and the whole step is skipped** — the image is then built
+exactly as before, with no driver work at all.
+
+### What it does
+
+1. Downloads [NVCleanstall](https://www.techpowerup.com/nvcleanstall/) and drives its
+   wizard to reproduce the reference build exactly:
+   - **Components:** only `Display Driver (required)`. Every optional component —
+     Legacy Control Panel, HD Audio via HDMI, VC++ 2017 runtimes, PhysX, USB-C,
+     FrameView, Quadro View, Virtual Audio, Telemetry, NV Platform Controllers,
+     DLSSR and the whole NV App block — is left out.
+   - **Installation Tweaks:** Disable Installer Telemetry & Advertising, Unattended
+     Express Install, Allow automatic reboot, Perform a Clean Installation, Disable
+     Ansel, Show Expert Tweaks, Disable Driver Telemetry, Disable NVIDIA HD Audio
+     sleep timer, Enable MSI, Disable HDCP, Rebuild digital signature,
+     Easy-Anti-Cheat-compatible method, Auto-accept the "driver unsigned" warning.
+2. If the GUI path fails for any reason, a **deterministic fallback** downloads the
+   official NVIDIA DCH package, unpacks it, prunes it to `Display.Driver`, applies the
+   same tweaks as INF edits and re-signs it with a locally generated certificate.
+3. Injects the result into the ISO: the driver goes into the offline `install.wim`
+   DriverStore, and the driver, its certificate and an installer are also staged and
+   run from `SetupComplete.cmd`, so the driver is trusted and installed on first boot.
+
+The build report is uploaded as an artifact (`nvidia-driver-buildinfo.json`).
+
+### Caveats
+
+- The tweaks change the driver's INF, which invalidates NVIDIA's signature — that is
+  why the driver is re-signed. The re-signed driver is trusted inside the image, but it
+  is **not** the same as NVIDIA's own signed package; treat it accordingly.
+- The GUI path drives a third-party Windows app that can change between versions. If it
+  stops working, the deterministic fallback takes over.
+- Builds that leave the input blank are unaffected.
+
+### Locally
+
+```powershell
+# Build the debloated driver on its own
+.\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36
+
+# Skip the NVCleanstall GUI and use the deterministic fallback
+.\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36 -SkipGui
+
+# Inject it during a Core-Gaming build
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
+    -NvidiaDriverPath .\scripts\nvidia-driver
+```
 
 ---
 
