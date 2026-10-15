@@ -3,19 +3,43 @@
     Unit tests for Windows build-number extraction in the *-headless.ps1 builder scripts.
     Author: kelexine (https://github.com/kelexine)
     Run: Invoke-Pester ./tests/Test-BuildNumberParsing.Tests.ps1
+
+.NOTES
+    Pester 5 requires helper functions and path resolution to live inside BeforeAll:
+    code at the top level of a test file runs during discovery, so anything it defines
+    (or any $PSScriptRoot it reads) is not visible to the It blocks at run time.
 #>
 
-function Get-TestBuildNumber {
-    param([string]$FullVersion)
-    if ($FullVersion -match '(\d+\.\d+)$') {
-        return $Matches[1]
+BeforeAll {
+    # Mirror of the extraction block the builders use. The builders run their whole
+    # build at load time, so their internals cannot be dot-sourced for a direct unit
+    # test - keep this in sync with the '(\d+\.\d+)$' capture in the *-headless.ps1 files.
+    function Get-TestBuildNumber {
+        param([string]$FullVersion)
+        if ($FullVersion -match '(\d+\.\d+)$') {
+            return $Matches[1]
+        }
+        return ""
     }
-    return ""
+
+    $script:RepoRoot = Split-Path -Parent $PSScriptRoot
+    $script:Scripts = @(
+        'scripts\tiny11maker-headless.ps1',
+        'scripts\tiny11coremaker-headless.ps1',
+        'scripts\nano11builder-headless.ps1'
+    ) | ForEach-Object {
+        $full = Join-Path $script:RepoRoot $_
+        [pscustomobject]@{
+            scriptName = Split-Path -Leaf $full
+            scriptPath = $full
+            content    = if (Test-Path -LiteralPath $full) { Get-Content -LiteralPath $full -Raw } else { '' }
+        }
+    }
 }
 
 Describe "Windows build number extraction" {
 
-    It "extracts <build>.<ubr> from a standard 4-segment version string" {
+    It "extracts [build].[ubr] from a standard 4-segment version string" {
         Get-TestBuildNumber -FullVersion "10.0.26200.8655" | Should -Be "26200.8655"
     }
 
@@ -48,27 +72,15 @@ Describe "Windows build number extraction" {
 
 Describe "Consistency across all three maker scripts" {
 
-    $repoRoot = Split-Path -Parent $PSScriptRoot
-    $scripts = @(
-        "$repoRoot\scripts\tiny11maker-headless.ps1",
-        "$repoRoot\scripts\tiny11coremaker-headless.ps1",
-        "$repoRoot\scripts\nano11builder-headless.ps1"
-    )
+    It "<scriptName> contains the build-number capture block" -ForEach $script:Scripts {
+        $scriptPath | Should -Not -BeNullOrEmpty
+        Test-Path -LiteralPath $scriptPath | Should -BeTrue
+        $content | Should -Match ([regex]::Escape('$script:DetectedBuildNumber'))
+        $content | Should -Match ([regex]::Escape("'(\d+\.\d+)$'"))
+    }
 
-    foreach ($scriptPath in $scripts) {
-        $scriptName = Split-Path -Leaf $scriptPath
-
-        It "$scriptName contains the build-number capture block" {
-            Test-Path $scriptPath | Should -Be $true
-            $content = Get-Content -Path $scriptPath -Raw
-            $content | Should -Match ([regex]::Escape('$script:DetectedBuildNumber'))
-            $content | Should -Match ([regex]::Escape("'(\d+\.\d+)$'"))
-        }
-
-        It "$scriptName defines Write-BuildInfo" {
-            $content = Get-Content -Path $scriptPath -Raw
-            $content | Should -Match "function Write-BuildInfo"
-        }
+    It "<scriptName> defines Write-BuildInfo" -ForEach $script:Scripts {
+        $content | Should -Match "function Write-BuildInfo"
     }
 }
 
@@ -79,35 +91,23 @@ Describe "Regression: basic image list object has no 'Version' property" {
     # "The property 'Version' cannot be found on this object." This regressed
     # a real CI run (nano11, index 6, Pro) - see commit fixing this file.
 
-    $repoRoot = Split-Path -Parent $PSScriptRoot
-    $scripts = @(
-        "$repoRoot\scripts\tiny11maker-headless.ps1",
-        "$repoRoot\scripts\tiny11coremaker-headless.ps1",
-        "$repoRoot\scripts\nano11builder-headless.ps1"
-    )
+    It "<scriptName> does not read .Version directly off the basic list object" -ForEach $script:Scripts {
+        # The buggy pattern: assigning DetectedFullVersion straight from
+        # $selectedImage (the Where-Object-filtered list entry).
+        $content | Should -Not -Match ([regex]::Escape('$script:DetectedFullVersion = $selectedImage.Version'))
+    }
 
-    foreach ($scriptPath in $scripts) {
-        $scriptName = Split-Path -Leaf $scriptPath
-        $content = Get-Content -Path $scriptPath -Raw
+    It "<scriptName> re-queries Get-WindowsImage with -Index for the detailed object" -ForEach $script:Scripts {
+        $content | Should -Match ([regex]::Escape('Get-WindowsImage -ImagePath $sourceImagePath -Index $script:INDEX'))
+    }
 
-        It "$scriptName does not read .Version directly off the basic list object" {
-            # The buggy pattern: assigning DetectedFullVersion straight from
-            # $selectedImage (the Where-Object-filtered list entry).
-            $content | Should -Not -Match ([regex]::Escape('$script:DetectedFullVersion = $selectedImage.Version'))
-        }
+    It "<scriptName> guards the detailed re-query in a try/catch so a DISM failure can't hard-crash the build" -ForEach $script:Scripts {
+        $pattern = '(?s)try\s*\{[^}]*Get-WindowsImage -ImagePath \$sourceImagePath -Index \$script:INDEX.*?\}\s*catch\s*\{'
+        $content | Should -Match $pattern
+    }
 
-        It "$scriptName re-queries Get-WindowsImage with -Index for the detailed object" {
-            $content | Should -Match ([regex]::Escape('Get-WindowsImage -ImagePath $sourceImagePath -Index $script:INDEX'))
-        }
-
-        It "$scriptName guards the detailed re-query in a try/catch so a DISM failure can't hard-crash the build" {
-            $pattern = '(?s)try\s*\{[^}]*Get-WindowsImage -ImagePath \$sourceImagePath -Index \$script:INDEX.*?\}\s*catch\s*\{'
-            $content | Should -Match $pattern
-        }
-
-        It "$scriptName verifies the 'Version' property exists before reading it" {
-            $content | Should -Match ([regex]::Escape("PSObject.Properties.Match('Version')"))
-        }
+    It "<scriptName> verifies the 'Version' property exists before reading it" -ForEach $script:Scripts {
+        $content | Should -Match ([regex]::Escape("PSObject.Properties.Match('Version')"))
     }
 
     It "simulated fix: detailed per-index object exposes Version, basic list object does not" {

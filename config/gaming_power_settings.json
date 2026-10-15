@@ -1,0 +1,319 @@
+{
+  "schemaVersion": "2.0.0",
+  "title": "Atlas Power Scheme (matched to the live AtlasOS scheme)",
+  "description": "Reproduces the power scheme that AtlasOS installs, verified against the scheme active on the maintainer's machine. That scheme is Ultimate Performance plus exactly two overrides, so the base template here is Ultimate Performance rather than High performance - duplicating a different base would not match.",
+  "schemeName": "Atlas Power Scheme",
+  "schemeDescription": "Latency-first scheme reproduced from the AtlasOS power scheme.",
+  "matchedAgainst": {
+    "guid": "11111111-1111-1111-1111-111111111111",
+    "name": "Atlas Power Scheme",
+    "capturedWith": "powercfg -query",
+    "capturedOn": "2026-10-15",
+    "finding": "27 visible settings. 25 are byte-identical to the built-in Ultimate Performance scheme; the only differences are USB selective suspend (AC 1 -> 0) and Turn off display after (AC 900 -> 0)."
+  },
+  "baseTemplate": {
+    "guid": "e9a42b02-d5df-448d-aa00-03f14749eb61",
+    "name": "Ultimate Performance",
+    "fallbacks": [
+      {
+        "guid": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+        "name": "High performance"
+      },
+      {
+        "guid": "381b4222-f694-41f0-9685-ff5bb260df2e",
+        "name": "Balanced"
+      }
+    ]
+  },
+  "settings": [
+    {
+      "name": "Turn off hard disk after",
+      "subgroup": "0012ee47-9041-4b5d-9b77-535fba8b1442",
+      "subgroupName": "Hard disk",
+      "setting": "6738e2c4-e8a5-4a42-b16a-e040e769756e",
+      "ac": 0,
+      "dc": 0
+    },
+    {
+      "name": "JavaScript Timer Frequency",
+      "subgroup": "02f815b5-a5cf-4c84-bf20-649d1f75d3d8",
+      "subgroupName": "Internet Explorer",
+      "setting": "4c793e7d-a264-42e1-87d3-7a0d2f523ccd",
+      "ac": 1,
+      "dc": 0
+    },
+    {
+      "name": "Slide show",
+      "subgroup": "0d7dbae2-4294-402a-ba8e-26777e8488cd",
+      "subgroupName": "Desktop background settings",
+      "setting": "309dce9b-bef4-4119-9921-a851fb12f0f4",
+      "ac": 0,
+      "dc": 1
+    },
+    {
+      "name": "Power Saving Mode",
+      "subgroup": "19cbb8fa-5279-450e-9fac-8a3d5fedd0c1",
+      "subgroupName": "Wireless Adapter Settings",
+      "setting": "12bbebe6-58d6-4636-95bb-3217ef867c1a",
+      "ac": 0,
+      "dc": 2
+    },
+    {
+      "name": "Sleep after",
+      "subgroup": "238c9fa8-0aad-41ed-83f4-97be242c8f20",
+      "subgroupName": "Sleep",
+      "setting": "29f6c1db-86da-48c5-9fdb-f2b67b1f44da",
+      "ac": 0,
+      "dc": 600
+    },
+    {
+      "name": "Allow hybrid sleep",
+      "subgroup": "238c9fa8-0aad-41ed-83f4-97be242c8f20",
+      "subgroupName": "Sleep",
+      "setting": "94ac6d29-73ce-41a6-809f-6363ba21b47e",
+      "ac": 1,
+      "dc": 1
+    },
+    {
+      "name": "Hibernate after",
+      "subgroup": "238c9fa8-0aad-41ed-83f4-97be242c8f20",
+      "subgroupName": "Sleep",
+      "setting": "9d7815a6-7ee4-497e-8888-515a05f02364",
+      "ac": 0,
+      "dc": 0
+    },
+    {
+      "name": "Allow wake timers",
+      "subgroup": "238c9fa8-0aad-41ed-83f4-97be242c8f20",
+      "subgroupName": "Sleep",
+      "setting": "bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d",
+      "ac": 1,
+      "dc": 1
+    },
+    {
+      "name": "USB selective suspend setting",
+      "subgroup": "2a737441-1930-4402-8d77-b2bebba308a3",
+      "subgroupName": "USB settings",
+      "setting": "48e6b7a6-50f5-4782-a5d4-53bb8f07e226",
+      "ac": 0,
+      "dc": 1,
+      "atlasOverride": true,
+      "note": "One of only two values that differ from the Ultimate Performance base in the Atlas scheme: USB selective suspend is disabled on AC."
+    },
+    {
+      "name": "Start menu power button",
+      "subgroup": "4f971e89-eebd-4455-a8de-9e59040e7347",
+      "subgroupName": "Power buttons and lid",
+      "setting": "a7066653-8d6c-40a8-910e-a1f54b84c7e5",
+      "ac": 0,
+      "dc": 0
+    },
+    {
+      "name": "Link State Power Management",
+      "subgroup": "501a4d13-42af-4429-9fd1-a8218c268e20",
+      "subgroupName": "PCI Express",
+      "setting": "ee12f906-d277-404b-b6da-e5fa1a576df5",
+      "ac": 0,
+      "dc": 2
+    },
+    {
+      "name": "Minimum processor state",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "893dee8e-2bef-41e0-89c6-b55d0929964c",
+      "ac": 100,
+      "dc": 5
+    },
+    {
+      "name": "Maximum processor state",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "bc5038f7-23e0-4960-96da-33abaf5935ec",
+      "ac": 100,
+      "dc": 100
+    },
+    {
+      "name": "Turn off display after",
+      "subgroup": "7516b95f-f776-4464-8c53-06167f40cc99",
+      "subgroupName": "Display",
+      "setting": "3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e",
+      "ac": 0,
+      "dc": 180,
+      "atlasOverride": true,
+      "note": "The other Atlas override: the display never turns off on AC (Ultimate Performance uses 900 s)."
+    },
+    {
+      "name": "Display brightness",
+      "subgroup": "7516b95f-f776-4464-8c53-06167f40cc99",
+      "subgroupName": "Display",
+      "setting": "aded5e82-b909-4619-9949-f5d71dac0bcb",
+      "ac": 100,
+      "dc": 75
+    },
+    {
+      "name": "Dimmed display brightness",
+      "subgroup": "7516b95f-f776-4464-8c53-06167f40cc99",
+      "subgroupName": "Display",
+      "setting": "f1fbfde2-a960-4165-9f88-50667911ce96",
+      "ac": 50,
+      "dc": 50
+    },
+    {
+      "name": "Enable adaptive brightness",
+      "subgroup": "7516b95f-f776-4464-8c53-06167f40cc99",
+      "subgroupName": "Display",
+      "setting": "fbd9aa66-9553-4097-ba44-ed6e9d65eab8",
+      "ac": 0,
+      "dc": 0
+    },
+    {
+      "name": "When sharing media",
+      "subgroup": "9596fb26-9850-41fd-ac3e-f7c3c00afd4b",
+      "subgroupName": "Multimedia settings",
+      "setting": "03680956-93bc-4294-bba6-4e0f09bb717f",
+      "ac": 1,
+      "dc": 0
+    },
+    {
+      "name": "Video playback quality bias",
+      "subgroup": "9596fb26-9850-41fd-ac3e-f7c3c00afd4b",
+      "subgroupName": "Multimedia settings",
+      "setting": "10778347-1370-4ee0-8bbd-33bdacaade49",
+      "ac": 1,
+      "dc": 0
+    },
+    {
+      "name": "When playing video",
+      "subgroup": "9596fb26-9850-41fd-ac3e-f7c3c00afd4b",
+      "subgroupName": "Multimedia settings",
+      "setting": "34c7b99f-9a6d-4b3c-8dc7-b6693b78cef4",
+      "ac": 0,
+      "dc": 1
+    },
+    {
+      "name": "Critical battery notification",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "5dbb7c9f-38e9-40d2-9749-4f8a0e9f640f",
+      "ac": 1,
+      "dc": 1
+    },
+    {
+      "name": "Critical battery action",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "637ea02f-bbcb-4015-8e2c-a1c7b9c0b546",
+      "ac": 2,
+      "dc": 2
+    },
+    {
+      "name": "Low battery level",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "8183ba9a-e910-48da-8769-14ae6dc1170a",
+      "ac": 10,
+      "dc": 10
+    },
+    {
+      "name": "Critical battery level",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "9a66d8d7-4ff7-4ef9-b5a2-5a326ca2a469",
+      "ac": 5,
+      "dc": 5
+    },
+    {
+      "name": "Low battery notification",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "bcded951-187b-4d05-bccc-f7e51960c258",
+      "ac": 1,
+      "dc": 1
+    },
+    {
+      "name": "Low battery action",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "d8742dcb-3e6a-4b3c-b3fe-374623cdcf06",
+      "ac": 0,
+      "dc": 0
+    },
+    {
+      "name": "Reserve battery level",
+      "subgroup": "e73a048d-bf27-4f12-9731-8b2076e8891f",
+      "subgroupName": "Battery",
+      "setting": "f3c5027d-cd16-4930-aa6b-90db844a8f00",
+      "ac": 7,
+      "dc": 7
+    },
+    {
+      "name": "Processor idle disable",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "5d76a2ca-e8c0-402f-a133-2158492d58ad",
+      "ac": 1,
+      "dc": 1,
+      "group": "disable_cpu_idle",
+      "beyondAtlas": true,
+      "note": "DIVERGENCE FROM ATLAS. Atlas leaves CPU idle enabled; this forces C-State 0 to remove the C-State wake penalty. Costs idle power and raises temperatures."
+    },
+    {
+      "name": "Processor performance boost mode",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "be337238-0d82-4146-a960-4f3749d470c7",
+      "ac": 2,
+      "dc": 2,
+      "hidden": true,
+      "beyondAtlas": true,
+      "note": "2 = Aggressive. Redundant on the Ultimate Performance base; acts as a fallback guarantee if the base template degrades to High performance."
+    },
+    {
+      "name": "Processor performance time check interval",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "4b92d758-5a24-4851-a470-815d78aee119",
+      "ac": 15,
+      "dc": 15,
+      "hidden": true,
+      "beyondAtlas": true
+    },
+    {
+      "name": "Processor performance core parking min cores",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "0cc5b647-c1df-4637-891a-dec35c318583",
+      "ac": 100,
+      "dc": 100,
+      "hidden": true,
+      "beyondAtlas": true,
+      "note": "100 = no core parking."
+    }
+  ],
+  "bcd": [
+    {
+      "args": "/set hypervisorlaunchtype off",
+      "note": "Required for the VBS/HVCI-off path; also removes Hyper-V scheduler overhead."
+    },
+    {
+      "args": "/set useplatformclock false",
+      "note": "Prefer the invariant TSC over the platform clock."
+    },
+    {
+      "args": "/set disabledynamictick yes",
+      "note": "Keep the system timer running at a constant rate."
+    },
+    {
+      "args": "/set useplatformtick yes",
+      "note": "Use the platform tick source."
+    },
+    {
+      "args": "/set timeout 5",
+      "note": "Short boot menu."
+    },
+    {
+      "args": "/set nx OptIn",
+      "note": "Keep DEP enabled - this is not a security downgrade."
+    }
+  ]
+}
