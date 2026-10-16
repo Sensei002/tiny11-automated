@@ -1,5 +1,0 @@
-# Bundled third-party binaries - never apply line-ending conversion to these.
-# tools/NVCleanstall_1.19.0.exe is vendored so builds do not depend on
-# TechPowerUp's anti-bot download. Its SHA256 is pinned in
-# config/nvidia_driver_profile.json and verified before every run.
-tools/*.exe binary

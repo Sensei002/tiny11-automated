@@ -68,15 +68,6 @@ on:
           - 'auto-admin'
           - 'classic'
 
-      # ---------------- NVIDIA driver (optional) ----------------
-      # NOTE: workflow_dispatch allows at most 25 inputs and this workflow uses all 25,
-      # so the driver build path is NOT an input - it is the gui.enabled flag in
-      # config/nvidia_driver_profile.json (see the "Build NVIDIA driver" step).
-      nvidia_driver_version:
-        description: 'If you have an NVIDIA GPU, enter your desired driver version number (e.g. 566.36). The workflow builds a debloated driver from it, applies the reference debloat tweaks and injects the driver into the ISO so it is installed out of the box. Leave BLANK to skip NVIDIA driver injection entirely.'
-        required: false
-        default: ''
-
       # ---------------- Gaming profile groups ----------------
       hags:
         description: 'Gaming: Hardware Accelerated GPU Scheduling. "on" forces it on, "off" forces it off, "leave" keeps the Core default.'
@@ -160,13 +151,7 @@ env:
 
 jobs:
   build-tiny11-core-gaming:
-    # Pinned to windows-2022 rather than windows-latest on purpose: rebuilding the
-    # NVIDIA driver's catalog after the INF tweaks needs inf2cat.exe, which ships
-    # with the Windows DRIVER Kit. The windows-2025 image only carries the WDK Visual
-    # Studio extension and the SDK (signtool), so the tweaked driver could be signed
-    # but never given a matching catalog - and a driver whose catalog does not match
-    # will not install. See scripts/nvidia-driver-builder.ps1 (Get-Inf2CatPath).
-    runs-on: windows-2022
+    runs-on: windows-latest
     timeout-minutes: 480
     permissions:
       contents: write
@@ -250,15 +235,6 @@ jobs:
             (Resolve-Path "scripts\gaming-profile.ps1"), [ref]$null, [ref]$null)
           Write-Output "gaming-profile.ps1 parsed cleanly"
 
-          # Same fail-fast check for the optional NVIDIA driver profile + engine.
-          $nvidiaProfilePath = "config\nvidia_driver_profile.json"
-          if (Test-Path $nvidiaProfilePath) {
-            $null = Get-Content $nvidiaProfilePath -Raw | ConvertFrom-Json
-            $null = [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path "scripts\nvidia-driver-builder.ps1"), [ref]$null, [ref]$null)
-            Write-Output "NVIDIA driver profile + engine parsed cleanly"
-          }
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -310,85 +286,6 @@ jobs:
           Write-Output "Installing aria2c for faster downloads..."
           choco install aria2 -y --no-progress
           aria2c --version
-
-      - name: Build NVIDIA driver (optional)
-        shell: pwsh
-        run: |
-          # Blank input => skip driver injection completely and leave the image untouched.
-          $version = "${{ github.event.inputs.nvidia_driver_version }}".Trim()
-
-          if ([string]::IsNullOrWhiteSpace($version)) {
-            Write-Output "No NVIDIA driver version supplied - driver injection will be skipped."
-            Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_REQUESTED=false"
-            exit 0
-          }
-
-          # The build path is not a workflow input: workflow_dispatch caps inputs at 25
-          # and this workflow already defines 25. It comes from the profile's
-          # gui.enabled flag instead (false = deterministic build, true = try the
-          # NVCleanstall wizard first). Pass 'auto' so the profile decides.
-          $method = 'auto'
-
-          # Report the signing toolchain up front: the INF-level tweaks can only be
-          # baked in when both inf2cat (WDK) and signtool (SDK) are present, because
-          # editing the INF invalidates NVIDIA's catalog and a driver whose catalog
-          # does not match will not install.
-          $kitsBin = 'C:\Program Files (x86)\Windows Kits\10\bin'
-          $inf2cat = Get-ChildItem $kitsBin -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName 'x64\inf2cat.exe' } |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-          $signtool = Get-ChildItem $kitsBin -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-          Write-Output "inf2cat.exe : $(if ($inf2cat) { $inf2cat } else { 'NOT FOUND - INF tweaks will be skipped' })"
-          Write-Output "signtool.exe: $(if ($signtool) { $signtool } else { 'NOT FOUND - driver cannot be re-signed' })"
-
-          Write-Output "=== Building debloated NVIDIA driver: $version (method: $method) ==="
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_REQUESTED=true"
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_VERSION=$version"
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_METHOD_REQUESTED=$method"
-
-          $outputDir    = Join-Path $PWD 'nvidia-driver'
-          $nvCleanstall = Join-Path $PWD 'tools\NVCleanstall_1.19.0.exe'
-
-          $builderArgs = @(
-            '-DriverVersion', $version
-            '-OutputDir',     $outputDir
-            '-Method',        $method
-          )
-          if (Test-Path $nvCleanstall) {
-            Write-Output "Using bundled NVCleanstall: $nvCleanstall"
-            $builderArgs += @('-NvCleanstallPath', $nvCleanstall)
-          } else {
-            Write-Output "Bundled NVCleanstall not found - the engine will fall back to downloading it."
-          }
-
-          & .\scripts\nvidia-driver-builder.ps1 @builderArgs
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "nvidia-driver-builder.ps1 exited with code $LASTEXITCODE"
-            exit 1
-          }
-
-          $infoPath = Join-Path $outputDir 'nvidia-driver-buildinfo.json'
-          if (-not (Test-Path $infoPath)) {
-            Write-Error "NVIDIA driver build produced no report at $infoPath"
-            exit 1
-          }
-
-          $info = Get-Content $infoPath -Raw | ConvertFrom-Json
-          if (-not $info.success) {
-            Write-Error "NVIDIA driver build failed: $($info.error)"
-            exit 1
-          }
-
-          Write-Output "NVIDIA driver ready: $($info.display_inf) via $($info.method) path ($($info.file_count) files, $($info.size_mb) MB, re-signed=$($info.resigned), tweaks-in-INF=$($info.tweaks_in_inf))"
-
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_PATH=$outputDir"
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_METHOD=$($info.method)"
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_SIZE_MB=$($info.size_mb)"
-          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_TWEAKS_IN_INF=$($info.tweaks_in_inf)"
 
       - name: Display build warnings
         shell: pwsh
@@ -550,13 +447,6 @@ jobs:
           if ("${{ github.event.inputs.skip_cleanup }}" -eq "true") {
             $params.SkipCleanup = $true
             Write-Output "Cleanup will be skipped (debugging mode)"
-          }
-
-          if (-not [string]::IsNullOrWhiteSpace($env:NVIDIA_DRIVER_PATH)) {
-            $params.NvidiaDriverPath = $env:NVIDIA_DRIVER_PATH
-            Write-Output "NVIDIA driver injection: $($env:NVIDIA_DRIVER_PATH) (method: $($env:NVIDIA_DRIVER_METHOD))"
-          } else {
-            Write-Output "NVIDIA driver injection: skipped (no version supplied)"
           }
 
           $enableDotNet = [System.Boolean]::Parse("${{ github.event.inputs.enable_dotnet35 }}")
@@ -946,8 +836,6 @@ jobs:
           path: |
             scripts/tiny11core-gaming-buildinfo.json
             config/gaming_profile.json
-            nvidia-driver/nvidia-driver-buildinfo.json
-            nvidia-driver/tinynvidia-driver.cer
           retention-days: 30
           if-no-files-found: warn
 
@@ -979,10 +867,6 @@ jobs:
             | **Index** | ${{ github.event.inputs.image_index }} |
             | **HAGS** | ${{ github.event.inputs.hags }} |
             | **WinRE** | ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }} |
-            | **NVIDIA driver** | ${{ github.event.inputs.nvidia_driver_version != '' && format('{0} (debloated, injected)', github.event.inputs.nvidia_driver_version) || 'None' }} |
-
-            ### 🎮 NVIDIA driver
-            ${{ github.event.inputs.nvidia_driver_version != '' && format('This build has a debloated NVIDIA driver **{0}** injected into the ISO. It is installed automatically on first boot, so no separate driver install is needed on an NVIDIA system. The official NVIDIA package was pruned to the Display Driver component only (no GeForce Experience / NVIDIA App, no telemetry, no PhysX, no HD Audio) and the reference debloat tweaks were applied.', github.event.inputs.nvidia_driver_version) || 'No NVIDIA driver was requested for this build (`nvidia_driver_version` was left blank).' }}
 
             ### ⚡ Applied in this build
             | Group | State |
@@ -1058,7 +942,6 @@ jobs:
           - **Type:** Core-Gaming (latency-first, AtlasOS-style)
           - **HAGS:** ${{ github.event.inputs.hags }}
           - **WinRE:** ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }}
-          - **NVIDIA driver:** ${{ github.event.inputs.nvidia_driver_version != '' && format('{0} (debloated, injected)', github.event.inputs.nvidia_driver_version) || 'None' }}
 
           ## 📥 Download
           ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}
