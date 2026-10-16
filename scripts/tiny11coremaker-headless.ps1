@@ -813,9 +813,10 @@ function Remove-WindowsUpdateStack {
     # Policy side, belt and braces alongside the always-on localhost redirect.
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
 
-    # Hide both Settings pages. The always-on Core value uses 'virus', which is not
-    # a Windows 11 page id - the Windows Security page is 'windowsdefender'.
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'
+    # The Settings page visibility value is deliberately NOT written here.
+    # Apply-RegistryTweaks owns it and already hides both pages with valid page
+    # ids, so a second write site would only reintroduce a call-order dependency
+    # between the two paths.
 
     Write-Log "Windows Update stack removal finished"
 }
@@ -1394,8 +1395,16 @@ function Apply-RegistryTweaks {
     # environment on first boot after winre.wim has been removed.
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
 
-    # Hide settings pages
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:virus;windowsupdate'
+    # Hide both Settings pages. This is the ONLY write site for
+    # SettingsPageVisibility in this script: a Core-Gaming build inherits it
+    # rather than writing its own copy, so the shipped value cannot depend on
+    # the order the two code paths happen to run in.
+    #
+    # Page ids are the ms-settings URI minus the 'ms-settings:' prefix. The
+    # Windows Security page is 'windowsdefender'. The value here used to read
+    # 'hide:virus;windowsupdate' - 'virus' is not a Windows 11 page id at all,
+    # so it hid nothing.
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'
 
     # Easter Egg / Branding
     Write-Log "Adding Easter Egg branding..."

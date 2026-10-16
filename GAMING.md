@@ -143,7 +143,14 @@ why a Core image can still show *"Updates are underway, do not turn off your PC"
 - `UsoSvc` (Update Orchestrator) runs the servicing pass at boot.
 
 Core-Gaming deletes all three service keys, removes the Update Orchestrator scheduled tasks,
-sets `NoAutoUpdate`, and hides the Windows Update and Windows Security pages in Settings.
+sets `NoAutoUpdate`, and hides the Windows Update and Windows Security pages in Settings via
+the `SettingsPageVisibility` policy (`hide:windowsupdate;windowsdefender`).
+
+> **What hiding the Settings pages does and does not do.** `SettingsPageVisibility` is a
+> *navigation-level* hide — it removes the pages from the Settings list. It is not a removal,
+> so a leftover tile, an `ms-settings:windowsupdate` link or a notification can still open the
+> page. When that happens the page will fail to render, because the Update Orchestrator and
+> Medic services backing it have been deleted. An error there is expected, not a build fault.
 
 `wuaueng.dll` and `wuapi.dll` are deliberately **left in place** — other inbox components
 link them, and a missing DLL fails hard rather than degrading. With the services gone,

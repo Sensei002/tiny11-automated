@@ -291,7 +291,7 @@ Siege on a CPU-bound machine.
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
-| **Defender & Update** | Windows Defender / Security **removed outright**, plus the entire Windows Update stack — service, Update Medic, Update Orchestrator and the Settings page. Always on for Core-Gaming; not a group toggle |
+| **Defender & Update** | Windows Defender / Security **removed outright**, plus the entire Windows Update stack — service, Update Medic, Update Orchestrator and the Settings entry. Always on for Core-Gaming; not a group toggle |
 
 Game runtimes (VC++, DirectX 9.0c, .NET Desktop) are deliberately **not** bundled — see
 [GAMING.md](GAMING.md#game-runtimes) for why and what to install yourself.
@@ -555,7 +555,7 @@ account screen.
 - LA57 CPU compatibility layer
 - Language features (OCR, Speech, Handwriting)
 - Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input; always removed on Core-Gaming)
-- Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings page (Core-Gaming only; a plain Core build only disables it)
+- Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings entry (hidden via policy; Core-Gaming only — a plain Core build only disables it)
 - Printer drivers (Nano only)
 - Scanner/MFD drivers (Nano only)
 

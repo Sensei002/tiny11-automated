@@ -1128,8 +1128,11 @@ function Apply-RegistryTweaks {
     # intentionally absent. (Companion to the Remove-WinRE build-time deletion.)
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
 
-    # Hide settings pages
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:virus;windowsupdate'
+    # Hide both Settings pages. Page ids are the ms-settings URI minus the
+    # 'ms-settings:' prefix, so the Windows Security page is 'windowsdefender'.
+    # This value used to read 'hide:virus;windowsupdate' - 'virus' is not a
+    # Windows 11 page id, so it hid nothing.
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'
 
     # Easter Egg / Branding
     Write-Log "Adding Easter Egg branding..."

@@ -586,9 +586,19 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
     }
 
     It 'hides both Settings pages using valid Windows 11 page ids' {
-        # The always-on Core value uses 'virus', which is not a page id; the Windows
-        # Security page is 'windowsdefender'.
+        # Page ids are the ms-settings URI minus the 'ms-settings:' prefix. The
+        # Windows Security page is 'windowsdefender'; 'virus' is not a page id.
+        # Asserted against the write itself rather than the bare string, so the
+        # comment above the write site can keep documenting the old broken value.
         $builder | Should -Match 'hide:windowsupdate;windowsdefender'
+        $builder | Should -Not -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:virus"))
+    }
+
+    It 'writes the Settings page visibility value from exactly one place' {
+        # Two write sites made the shipped value depend on call order - the gaming
+        # function ran last and won. Asserting a single write site removes the
+        # ordering question entirely, instead of pinning the order down.
+        ([regex]::Matches($builder, "SettingsPageVisibility' 'REG_SZ")).Count | Should -Be 1
     }
 
     It 'removes only the WU client executables, not the shared DLLs' {
@@ -605,12 +615,13 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
         ([regex]::Matches($builder, $gamingGate)).Count | Should -Be 2
     }
 
-    It 'leaves the plain Core Windows Update disable exactly as it was' {
+    It 'leaves the plain Core Windows Update disable in place' {
         # Regression guard: a plain Core build must keep the weaker localhost +
-        # Start=4 disable, including the original SettingsPageVisibility value.
+        # Start=4 disable. It now inherits the single, corrected page-visibility
+        # write rather than shipping a copy of its own.
         $builder | Should -Match ([regex]::Escape("Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess'"))
         $builder | Should -Match ([regex]::Escape("'HKLM\zSYSTEM\ControlSet001\Services\wuauserv' 'Start' 'REG_DWORD' '4'"))
-        $builder | Should -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:virus;windowsupdate'"))
+        $builder | Should -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'"))
     }
 
     It 'does not touch DoSvc, which belongs to the profile groups' {
