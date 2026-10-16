@@ -30,9 +30,9 @@ on:
         required: false
         default: '26H2'
       windows_iso_url:
-        description: 'Windows 11 ISO download URL (Microsoft links expire ~24h - refresh before each run)'
-        required: true
-        default: 'https://software.download.prss.microsoft.com/dbazure/Windows11_Client_x64_en-us_26300_9457.iso?t=5aba2b9f-4d84-435e-979b-9930114d06d3&P1=1792218880&P2=602&P3=2&P4=JeiqZyFHcMwlscEpiBPYVrdYoGzWEMaRA6F0wsGrDrb7b1qw5Ed02Srh9rQpxPuuxuZ2hyZxcGXsGpKBZj520%2fibMJymkjAvCjfoTTa%2fSE5GrC5xLAW3IxaXN8lNMOfXseDR9A1%2bfJk1fiac%2bdPdVt8BNDJ5Lbgfxi13uTj3%2bE%2bt6K%2fx2MKAw0FqzQIm%2bEz0mlswLUfDNY1aJpgP6US2AxnNMYHfQ1QbMBF4j8hAZFoL9hwbgsadfxAWcb7eNICftVLhwGNXZDzKm1RGucA36el4WTXo0HFwgjiAhX1LwnmiJzCOFakGW5vjEf6TznlX%2fYBbCQ2hMxQ5B0dpvtLjog%3d%3d'
+        description: 'Optional. Leave EMPTY to resolve a fresh, language-specific link from Microsoft at run time (recommended - Microsoft links expire ~24h). Set only to pin one specific ISO.'
+        required: false
+        default: ''
       windows_build:
         description: 'Fallback Windows build number (e.g. 26200.8655) — only used if it cannot be read directly from the ISO'
         required: false
@@ -48,9 +48,49 @@ on:
           - '6'
           - '7'
       language:
-        description: 'Language (e.g., English, Spanish, French)'
+        description: 'ISO language - the same list Microsoft''s own download page offers. Used to resolve a fresh download link when windows_iso_url is left empty.'
+        type: choice
         required: false
-        default: 'English'
+        default: 'English (United States)'
+        options:
+          - 'Arabic'
+          - 'Brazilian Portuguese'
+          - 'Bulgarian'
+          - 'Chinese Simplified'
+          - 'Chinese Traditional'
+          - 'Croatian'
+          - 'Czech'
+          - 'Danish'
+          - 'Dutch'
+          - 'English (United States)'
+          - 'English International'
+          - 'Estonian'
+          - 'Finnish'
+          - 'French'
+          - 'French Canadian'
+          - 'German'
+          - 'Greek'
+          - 'Hebrew'
+          - 'Hungarian'
+          - 'Italian'
+          - 'Japanese'
+          - 'Korean'
+          - 'Latvian'
+          - 'Lithuanian'
+          - 'Norwegian'
+          - 'Polish'
+          - 'Portuguese'
+          - 'Romanian'
+          - 'Russian'
+          - 'Serbian Latin'
+          - 'Slovak'
+          - 'Slovenian'
+          - 'Spanish'
+          - 'Spanish (Mexico)'
+          - 'Swedish'
+          - 'Thai'
+          - 'Turkish'
+          - 'Ukrainian'
       skip_cleanup:
         description: 'Skip cleanup (for debugging)'
         required: false
@@ -208,7 +248,14 @@ jobs:
           }
           $edition = $editions[$index]
 
-          $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z]', ''
+          # The language now comes from a dropdown whose values are spelled exactly as
+          # Microsoft spells them, e.g. 'English (United States)'. Filenames cannot carry
+          # spaces or brackets, so every non-alphanumeric is dropped:
+          #   'English (United States)' -> 'EnglishUnitedStates'
+          #   'Spanish (Mexico)'        -> 'SpanishMexico'
+          # Keeping the qualifier matters - 'Spanish' and 'Spanish (Mexico)' are different
+          # ISOs, and a bare 'Spanish' filename would make them indistinguishable.
+          $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z0-9]', ''
 
           $folderName = "Tiny11CoreGaming-$edition-$version"
 
@@ -310,6 +357,84 @@ jobs:
           choco install aria2 -y --no-progress
           aria2c --version
 
+      # The two ISO steps below run BEFORE the NVIDIA driver build. Resolving the link
+      # and proving it is alive takes seconds; discovering a dead link afterwards costs
+      # the ~13 minutes the driver build takes.
+      - name: Resolve Windows 11 ISO URL
+        # An empty windows_iso_url means "ask Microsoft for a fresh link". The links
+        # Microsoft hands out are signed and expire ~24h, so minting one at run time is
+        # more reliable than pasting one in and hoping it is still alive.
+        if: ${{ github.event.inputs.windows_iso_url == '' }}
+        shell: pwsh
+        run: |
+          $language = "${{ github.event.inputs.language }}"
+          Write-Output "No ISO URL supplied - resolving a fresh link from Microsoft for '$language'..."
+
+          try {
+            $iso = & .\scripts\resolve-windows-iso.ps1 -Language $language
+          } catch {
+            Write-Output "::error title=ISO resolve failed::$($_.Exception.Message)"
+            Write-Output ""
+            Write-Output "Microsoft's download service refused to hand out a link. This is normally"
+            Write-Output "temporary rate limiting or a blocked runner IP, and there is no way for this"
+            Write-Output "workflow to work around it."
+            Write-Output ""
+            Write-Output "Fallback: download the ISO in a browser from"
+            Write-Output "  https://www.microsoft.com/software-download/windows11"
+            Write-Output "then re-run this workflow with that URL pasted into 'windows_iso_url'."
+            exit 1
+          }
+
+          Write-Output "Resolved ISO: $($iso.FileName)"
+          Write-Output "  language : $($iso.Language)"
+          Write-Output "  SKU id   : $($iso.SkuId)"
+
+          # Kept out of the log above: the URL carries a signed token.
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_ISO_URL=$($iso.Url)"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_LANGUAGE=$($iso.Language)"
+
+      - name: Use supplied Windows 11 ISO URL
+        if: ${{ github.event.inputs.windows_iso_url != '' }}
+        shell: pwsh
+        run: |
+          Write-Output "A windows_iso_url was supplied - skipping auto-resolve."
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_ISO_URL=${{ github.event.inputs.windows_iso_url }}"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_LANGUAGE=${{ github.event.inputs.language }}"
+
+      - name: Preflight - validate Windows ISO URL
+        shell: pwsh
+        run: |
+          $url = $env:WINDOWS_ISO_URL
+
+          # Microsoft's dbazure links are signed and time-limited (?t=...&P1=...&P4=...).
+          # They expire roughly 24 hours after generation, and a dead link used to cost a
+          # whole run: the NVIDIA driver build burns ~13 minutes, then the download 403s.
+          # A single HEAD request settles it in under a second and downloads zero bytes.
+          $safeUrl = ($url -split '\?')[0]
+          Write-Output "Checking ISO link: $safeUrl"
+
+          $code = (& curl.exe -s -I -L --max-time 30 -o NUL -w '%{http_code}' "$url").Trim()
+
+          # Some endpoints reject HEAD outright; fall back to a 1-byte ranged GET before
+          # concluding the link is dead, so we never fail a valid URL over a probe quirk.
+          if ($code -notin @('200', '206')) {
+            Write-Output "HEAD returned HTTP $code - retrying with a 1-byte ranged GET..."
+            $code = (& curl.exe -s -L --max-time 30 -r 0-0 -o NUL -w '%{http_code}' "$url").Trim()
+          }
+
+          Write-Output "ISO link responded with HTTP $code"
+
+          if ($code -notin @('200', '206')) {
+            Write-Output "::error title=Expired or invalid ISO URL::The Windows ISO link returned HTTP $code."
+            Write-Output ""
+            Write-Output "Microsoft download links are signed and expire about 24 hours after they are generated."
+            Write-Output "Get a fresh link from https://www.microsoft.com/software-download/windows11 and pass it as"
+            Write-Output "the 'windows_iso_url' input when re-running this workflow."
+            exit 1
+          }
+
+          Write-Output "ISO link is live - proceeding."
+
       - name: Build NVIDIA driver (optional)
         if: ${{ github.event.inputs.nvidia_driver_version != '' }}
         shell: pwsh
@@ -375,44 +500,13 @@ jobs:
           Write-Output "Build will continue in 10 seconds..."
           Start-Sleep -Seconds 10
 
-      - name: Preflight - validate Windows ISO URL
-        shell: pwsh
-        run: |
-          $url = "${{ github.event.inputs.windows_iso_url }}"
-
-          # Microsoft's dbazure links are signed and time-limited (?t=...&P1=...&P4=...).
-          # They expire roughly 24 hours after generation, and a dead link used to cost a
-          # whole run: the NVIDIA driver build burns ~13 minutes, then the download 403s.
-          # A single HEAD request settles it in under a second and downloads zero bytes.
-          $safeUrl = ($url -split '\?')[0]
-          Write-Output "Checking ISO link: $safeUrl"
-
-          $code = (& curl.exe -s -I -L --max-time 30 -o NUL -w '%{http_code}' "$url").Trim()
-
-          # Some endpoints reject HEAD outright; fall back to a 1-byte ranged GET before
-          # concluding the link is dead, so we never fail a valid URL over a probe quirk.
-          if ($code -notin @('200', '206')) {
-            Write-Output "HEAD returned HTTP $code - retrying with a 1-byte ranged GET..."
-            $code = (& curl.exe -s -L --max-time 30 -r 0-0 -o NUL -w '%{http_code}' "$url").Trim()
-          }
-
-          Write-Output "ISO link responded with HTTP $code"
-
-          if ($code -notin @('200', '206')) {
-            Write-Output "::error title=Expired or invalid ISO URL::The Windows ISO link returned HTTP $code."
-            Write-Output ""
-            Write-Output "Microsoft download links are signed and expire about 24 hours after they are generated."
-            Write-Output "Get a fresh link from https://www.microsoft.com/software-download/windows11 and pass it as"
-            Write-Output "the 'windows_iso_url' input when re-running this workflow."
-            exit 1
-          }
-
-          Write-Output "ISO link is live - proceeding with the download."
-
       - name: Download Windows 11 ISO
         shell: pwsh
         run: |
-          $url = "${{ github.event.inputs.windows_iso_url }}"
+          # Set by whichever of the two steps above ran: the Microsoft resolver, or the
+          # windows_iso_url input. Never read the input directly here, or auto-resolve
+          # would silently download nothing.
+          $url = $env:WINDOWS_ISO_URL
           $output = "Win11_Source.iso"
 
           Write-Output "Downloading Windows 11 ISO from Microsoft servers..."
