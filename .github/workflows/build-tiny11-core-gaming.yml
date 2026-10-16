@@ -69,20 +69,13 @@ on:
           - 'classic'
 
       # ---------------- NVIDIA driver (optional) ----------------
+      # NOTE: workflow_dispatch allows at most 25 inputs and this workflow uses all 25,
+      # so the driver build path is NOT an input - it is the gui.enabled flag in
+      # config/nvidia_driver_profile.json (see the "Build NVIDIA driver" step).
       nvidia_driver_version:
         description: 'If you have an NVIDIA GPU, enter your desired driver version number (e.g. 566.36). The workflow builds a debloated driver from it, applies the reference debloat tweaks and injects the driver into the ISO so it is installed out of the box. Leave BLANK to skip NVIDIA driver injection entirely.'
         required: false
         default: ''
-
-      nvidia_driver_method:
-        description: 'NVIDIA driver: how to build the debloated driver. "fallback" (default) downloads the official NVIDIA package and prunes it deterministically. "gui" additionally tries to drive the NVCleanstall wizard first, falling back if that fails. "auto" defers to config/nvidia_driver_profile.json. Ignored when the driver version is blank.'
-        type: choice
-        required: false
-        default: 'fallback'
-        options:
-          - 'fallback'
-          - 'gui'
-          - 'auto'
 
       # ---------------- Gaming profile groups ----------------
       hags:
@@ -330,8 +323,11 @@ jobs:
             exit 0
           }
 
-          $method = "${{ github.event.inputs.nvidia_driver_method }}".Trim()
-          if ([string]::IsNullOrWhiteSpace($method)) { $method = 'fallback' }
+          # The build path is not a workflow input: workflow_dispatch caps inputs at 25
+          # and this workflow already defines 25. It comes from the profile's
+          # gui.enabled flag instead (false = deterministic build, true = try the
+          # NVCleanstall wizard first). Pass 'auto' so the profile decides.
+          $method = 'auto'
 
           # Report the signing toolchain up front: the INF-level tweaks can only be
           # baked in when both inf2cat (WDK) and signtool (SDK) are present, because

@@ -93,20 +93,25 @@ The build report is uploaded as an artifact (`nvidia-driver-buildinfo.json`).
 
 ### Choosing the build path
 
-The **`nvidia_driver_method`** input selects how the driver is produced:
+The workflow always uses the deterministic path. It is not selectable from the UI
+because `workflow_dispatch` allows at most 25 inputs and this workflow already defines
+25 — adding a 26th makes GitHub reject the whole workflow. To try the NVCleanstall GUI
+path instead, set `gui.enabled` to `true` in `config/nvidia_driver_profile.json`; the
+engine then attempts the wizard first and still falls back if it fails.
 
-| Value | Behaviour |
+| `gui.enabled` | Behaviour |
 |---|---|
-| `fallback` *(default)* | Deterministic: download the official package and prune it. Reproducible and testable. |
-| `gui` | Try to drive the NVCleanstall wizard first (using the copy vendored at `tools/NVCleanstall_1.19.0.exe`), then fall back if that fails. |
-| `auto` | Defer to `config/nvidia_driver_profile.json`. |
+| `false` *(default)* | Deterministic: download the official package and prune it. Reproducible and testable. |
+| `true` | Try to drive the NVCleanstall wizard first (using the copy vendored at `tools/NVCleanstall_1.19.0.exe`), then fall back if that fails. |
 
-The GUI path is **not the default, and `gui.enabled` is `false` in the profile**, because
-it cannot complete unattended: on a clean machine NVCleanstall's first page expects a
-driver it downloads through its own wizard, and its component/tweak pages are
-owner-drawn Delphi (VCL) controls rather than standard Win32 dialogs, so the selection
-cannot be verified from CI. Both paths produce the same debloated component set; the
-deterministic one is simply the one that can be trusted to finish.
+The GUI path is **not the default**, because it cannot complete unattended: on a clean
+machine NVCleanstall's first page expects a driver it downloads through its own wizard,
+and its component/tweak pages are owner-drawn Delphi (VCL) controls rather than standard
+Win32 dialogs, so the selection cannot be verified from CI. Both paths produce the same
+debloated component set; the deterministic one is simply the one that can be trusted to
+finish.
+
+Locally you can force either path with `-Method fallback|gui|auto`.
 
 ### Caveats
 

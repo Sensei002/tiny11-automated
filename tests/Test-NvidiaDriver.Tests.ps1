@@ -194,9 +194,23 @@ Describe "Workflow wiring" {
         $script:WorkflowContent -match "nvidia-driver-builder\.ps1 @builderArgs" | Should -BeTrue
     }
 
-    It "exposes a build-method input and passes it to the engine" {
-        $script:WorkflowContent -match 'nvidia_driver_method:' | Should -BeTrue
+    It "stays within the 25-input workflow_dispatch limit" {
+        # GitHub rejects the entire workflow with HTTP 422 - "you may only define up
+        # to 25 inputs" - if more are declared, which makes the workflow impossible
+        # to trigger at all. That is why the driver build path is a profile flag
+        # rather than a 26th input.
+        # Line endings are normalised first: with CRLF the `$` anchor in multiline
+        # mode never matches, so the count would silently come back as 0.
+        $normalized = $script:WorkflowContent -replace "`r`n", "`n"
+        $inputLines = [regex]::Matches($normalized, '(?m)^ {6}[a-z][a-z0-9_]*:$')
+        $inputLines.Count | Should -BeGreaterThan 0
+        $inputLines.Count | Should -BeLessOrEqual 25
+        $normalized | Should -Not -Match '(?m)^ {6}nvidia_driver_method:'
+    }
+
+    It "passes the build method to the engine from the profile" {
         $script:WorkflowContent -match "'-Method',\s*\$method" | Should -BeTrue
+        $script:Profile.gui.PSObject.Properties.Name | Should -Contain 'enabled'
     }
 
     It "fails the step when the engine exits non-zero" {
