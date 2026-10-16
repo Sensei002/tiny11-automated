@@ -72,7 +72,11 @@
 
   "fallback": {
     "enabled": true,
-    "driverUrlTemplate": "https://us.download.nvidia.com/Windows/{version}/{version}-{branch}-win10-win11-64bit-international-dch-whql.exe",
+    "driverUrlTemplate": "https://{host}/Windows/{version}/{version}-{branch}-win10-win11-64bit-international-dch-whql.exe",
+    "downloadHosts": [
+      "us.download.nvidia.com",
+      "international.download.nvidia.com"
+    ],
     "branchCandidates": [
       "desktop",
       "notebook"
@@ -97,11 +101,12 @@
   },
 
   "gui": {
+    "enabled": false,
     "stepTimeoutSeconds": 180,
     "actionDelayMs": 900,
     "navigationDelayMs": 1500,
     "captureScreenshots": true,
     "screenshotDir": "nvidia-gui-screenshots",
-    "note": "Best-effort control-message automation of the NVCleanstall v1.19.0 wizard. Any failure falls through to the deterministic fallback."
+    "note": "Best-effort control-message automation of the NVCleanstall v1.19.0 wizard. DISABLED by default: on a clean machine NVCleanstall's first page expects a driver that it downloads through its own wizard, and its component/tweak pages are owner-drawn VCL controls that cannot be verified from CI. Set enabled=true (or pass -Method gui) to try it; any failure still falls through to the deterministic fallback."
   }
 }

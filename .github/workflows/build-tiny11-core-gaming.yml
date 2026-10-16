@@ -70,9 +70,19 @@ on:
 
       # ---------------- NVIDIA driver (optional) ----------------
       nvidia_driver_version:
-        description: 'If you have an NVIDIA GPU, enter your desired driver version number (e.g. 566.36, or "latest"). The workflow downloads it with NVCleanstall, applies the reference debloat tweaks and injects the driver into the ISO so it is installed out of the box. Leave BLANK to skip NVIDIA driver injection entirely.'
+        description: 'If you have an NVIDIA GPU, enter your desired driver version number (e.g. 566.36). The workflow builds a debloated driver from it, applies the reference debloat tweaks and injects the driver into the ISO so it is installed out of the box. Leave BLANK to skip NVIDIA driver injection entirely.'
         required: false
         default: ''
+
+      nvidia_driver_method:
+        description: 'NVIDIA driver: how to build the debloated driver. "fallback" (default) downloads the official NVIDIA package and prunes it deterministically. "gui" additionally tries to drive the NVCleanstall wizard first, falling back if that fails. "auto" defers to config/nvidia_driver_profile.json. Ignored when the driver version is blank.'
+        type: choice
+        required: false
+        default: 'fallback'
+        options:
+          - 'fallback'
+          - 'gui'
+          - 'auto'
 
       # ---------------- Gaming profile groups ----------------
       hags:
@@ -157,7 +167,13 @@ env:
 
 jobs:
   build-tiny11-core-gaming:
-    runs-on: windows-latest
+    # Pinned to windows-2022 rather than windows-latest on purpose: rebuilding the
+    # NVIDIA driver's catalog after the INF tweaks needs inf2cat.exe, which ships
+    # with the Windows DRIVER Kit. The windows-2025 image only carries the WDK Visual
+    # Studio extension and the SDK (signtool), so the tweaked driver could be signed
+    # but never given a matching catalog - and a driver whose catalog does not match
+    # will not install. See scripts/nvidia-driver-builder.ps1 (Get-Inf2CatPath).
+    runs-on: windows-2022
     timeout-minutes: 480
     permissions:
       contents: write
@@ -314,19 +330,49 @@ jobs:
             exit 0
           }
 
-          Write-Output "=== Building debloated NVIDIA driver: $version ==="
+          $method = "${{ github.event.inputs.nvidia_driver_method }}".Trim()
+          if ([string]::IsNullOrWhiteSpace($method)) { $method = 'fallback' }
+
+          # Report the signing toolchain up front: the INF-level tweaks can only be
+          # baked in when both inf2cat (WDK) and signtool (SDK) are present, because
+          # editing the INF invalidates NVIDIA's catalog and a driver whose catalog
+          # does not match will not install.
+          $kitsBin = 'C:\Program Files (x86)\Windows Kits\10\bin'
+          $inf2cat = Get-ChildItem $kitsBin -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64\inf2cat.exe' } |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          $signtool = Get-ChildItem $kitsBin -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          Write-Output "inf2cat.exe : $(if ($inf2cat) { $inf2cat } else { 'NOT FOUND - INF tweaks will be skipped' })"
+          Write-Output "signtool.exe: $(if ($signtool) { $signtool } else { 'NOT FOUND - driver cannot be re-signed' })"
+
+          Write-Output "=== Building debloated NVIDIA driver: $version (method: $method) ==="
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_REQUESTED=true"
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_VERSION=$version"
+          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_METHOD_REQUESTED=$method"
 
-          $outputDir = Join-Path $PWD 'nvidia-driver'
+          $outputDir    = Join-Path $PWD 'nvidia-driver'
           $nvCleanstall = Join-Path $PWD 'tools\NVCleanstall_1.19.0.exe'
 
+          $builderArgs = @(
+            '-DriverVersion', $version
+            '-OutputDir',     $outputDir
+            '-Method',        $method
+          )
           if (Test-Path $nvCleanstall) {
             Write-Output "Using bundled NVCleanstall: $nvCleanstall"
-            & .\scripts\nvidia-driver-builder.ps1 -DriverVersion $version -OutputDir $outputDir -NvCleanstallPath $nvCleanstall
+            $builderArgs += @('-NvCleanstallPath', $nvCleanstall)
           } else {
-            Write-Output "Bundled NVCleanstall not found - the engine will download it."
-            & .\scripts\nvidia-driver-builder.ps1 -DriverVersion $version -OutputDir $outputDir
+            Write-Output "Bundled NVCleanstall not found - the engine will fall back to downloading it."
+          }
+
+          & .\scripts\nvidia-driver-builder.ps1 @builderArgs
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "nvidia-driver-builder.ps1 exited with code $LASTEXITCODE"
+            exit 1
           }
 
           $infoPath = Join-Path $outputDir 'nvidia-driver-buildinfo.json'
@@ -341,11 +387,12 @@ jobs:
             exit 1
           }
 
-          Write-Output "NVIDIA driver ready: $($info.display_inf) via $($info.method) path ($($info.file_count) files, $($info.size_mb) MB, re-signed=$($info.resigned))"
+          Write-Output "NVIDIA driver ready: $($info.display_inf) via $($info.method) path ($($info.file_count) files, $($info.size_mb) MB, re-signed=$($info.resigned), tweaks-in-INF=$($info.tweaks_in_inf))"
 
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_PATH=$outputDir"
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_METHOD=$($info.method)"
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_SIZE_MB=$($info.size_mb)"
+          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_TWEAKS_IN_INF=$($info.tweaks_in_inf)"
 
       - name: Display build warnings
         shell: pwsh
@@ -939,7 +986,7 @@ jobs:
             | **NVIDIA driver** | ${{ github.event.inputs.nvidia_driver_version != '' && format('{0} (debloated, injected)', github.event.inputs.nvidia_driver_version) || 'None' }} |
 
             ### 🎮 NVIDIA driver
-            ${{ github.event.inputs.nvidia_driver_version != '' && format('This build has a debloated NVIDIA driver **{0}** injected into the ISO. It is installed automatically on first boot, so no separate driver install is needed on an NVIDIA system. Built with [NVCleanstall](https://www.techpowerup.com/nvcleanstall/) (Display Driver only) and re-signed.', github.event.inputs.nvidia_driver_version) || 'No NVIDIA driver was requested for this build (`nvidia_driver_version` was left blank).' }}
+            ${{ github.event.inputs.nvidia_driver_version != '' && format('This build has a debloated NVIDIA driver **{0}** injected into the ISO. It is installed automatically on first boot, so no separate driver install is needed on an NVIDIA system. The official NVIDIA package was pruned to the Display Driver component only (no GeForce Experience / NVIDIA App, no telemetry, no PhysX, no HD Audio) and the reference debloat tweaks were applied.', github.event.inputs.nvidia_driver_version) || 'No NVIDIA driver was requested for this build (`nvidia_driver_version` was left blank).' }}
 
             ### ⚡ Applied in this build
             | Group | State |

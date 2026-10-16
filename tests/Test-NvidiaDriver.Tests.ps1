@@ -86,6 +86,15 @@ Describe "NVIDIA driver profile" {
         $script:Profile.tweaks.interrupt_policy   | Should -Be 'Default'
         $script:Profile.tweaks.interrupt_priority | Should -Be 'Default'
     }
+
+    It "ships with the GUI path disabled so the deterministic build runs by default" {
+        [bool]$script:Profile.gui.enabled | Should -BeFalse
+    }
+
+    It "templates the NVIDIA download across more than one host" {
+        $script:Profile.fallback.driverUrlTemplate | Should -Match '\{host\}'
+        @($script:Profile.fallback.downloadHosts).Count | Should -BeGreaterThan 1
+    }
 }
 
 Describe "NVIDIA driver engine" {
@@ -113,6 +122,41 @@ Describe "NVIDIA driver engine" {
     It "prefers the vendored copy over downloading" {
         $script:EngineContent -match 'bundledPath'      | Should -BeTrue
         $script:EngineContent -match '\$NvCleanstallPath' | Should -BeTrue
+    }
+
+    It "keeps log output off the success stream" {
+        # Write-Output here would append every log line to the return value of the
+        # function that logged it, so a function returning a path would hand back an
+        # array and the caller would try to launch a process named after the log line.
+        $script:EngineContent | Should -Match 'Write-Host \$line'
+        $script:EngineContent | Should -Not -Match 'Write-Output \$line'
+    }
+
+    It "returns a real Boolean from the download helper" {
+        $script:EngineContent | Should -Match 'function Get-FileWithRetry'
+        $script:EngineContent | Should -Match '\$ok = \(\$LASTEXITCODE -eq 0\)'
+        $script:EngineContent | Should -Match 'MinBytes'
+    }
+
+    It "chooses the build path from -Method or the profile" {
+        $script:EngineContent | Should -Match "ValidateSet\('auto', 'gui', 'fallback'\)"
+        $script:EngineContent | Should -Match '\$nvProfile\.gui\.enabled'
+    }
+
+    It "toggles VCL check boxes by clicking and reads the state back" {
+        # BM_SETCHECK only repaints the native button; VCL keeps its own Checked
+        # property and would go on to apply the previous selection.
+        $script:EngineContent | Should -Match '\$script:BM_GETCHECK'
+        $script:EngineContent | Should -Not -Match '\$script:BM_SETCHECK'
+    }
+
+    It "only edits the INF when a replacement catalog can be built" {
+        # Editing the INF invalidates NVIDIA's catalog, and a driver whose catalog
+        # does not match will not install from the DriverStore. inf2cat (WDK) is what
+        # rebuilds it, so the tweaks are gated on that tooling being present.
+        $script:EngineContent | Should -Match 'function Get-Inf2CatPath'
+        $script:EngineContent | Should -Match '\$canRebuild'
+        $script:EngineContent | Should -Match 'tweaks_in_inf'
     }
 }
 
@@ -147,7 +191,28 @@ Describe "Workflow wiring" {
 
     It "runs the driver builder only when a version is supplied" {
         $script:WorkflowContent -match 'NVIDIA_DRIVER_REQUESTED=false' | Should -BeTrue
-        $script:WorkflowContent -match 'nvidia-driver-builder\.ps1 -DriverVersion' | Should -BeTrue
+        $script:WorkflowContent -match "nvidia-driver-builder\.ps1 @builderArgs" | Should -BeTrue
+    }
+
+    It "exposes a build-method input and passes it to the engine" {
+        $script:WorkflowContent -match 'nvidia_driver_method:' | Should -BeTrue
+        $script:WorkflowContent -match "'-Method',\s*\$method" | Should -BeTrue
+    }
+
+    It "fails the step when the engine exits non-zero" {
+        $script:WorkflowContent -match 'nvidia-driver-builder\.ps1 exited with code' | Should -BeTrue
+    }
+
+    It "runs on an image that actually ships the Windows Driver Kit" {
+        # windows-latest moved to windows-2025, which only has the WDK Visual Studio
+        # extension - no inf2cat.exe, so a tweaked driver could never get a matching
+        # catalog. windows-2022 has the full WDK.
+        $script:WorkflowContent | Should -Match 'runs-on: windows-2022'
+    }
+
+    It "reports the signing toolchain before building the driver" {
+        $script:WorkflowContent | Should -Match 'inf2cat\.exe :'
+        $script:WorkflowContent | Should -Match 'signtool\.exe:'
     }
 
     It "passes the driver path to the builder" {

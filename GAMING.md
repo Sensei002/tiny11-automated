@@ -64,32 +64,49 @@ If the target machine has an NVIDIA GPU, the Core-Gaming workflow can bake a
 **debloated NVIDIA display driver** straight into the ISO, so a fresh install already
 has the driver — no separate driver install, no GeForce Experience, no telemetry.
 
-Set the **`nvidia_driver_version`** input to the version you want (e.g. `566.36`, or
-`latest`). **Leave it blank and the whole step is skipped** — the image is then built
-exactly as before, with no driver work at all.
+Set the **`nvidia_driver_version`** input to the version you want (e.g. `566.36`).
+**Leave it blank and the whole step is skipped** — the image is then built exactly as
+before, with no driver work at all.
 
 ### What it does
 
-1. Uses the copy of [NVCleanstall](https://www.techpowerup.com/nvcleanstall/) vendored
-   in the repository at `tools/NVCleanstall_1.19.0.exe` (SHA256-verified on every run)
-   and drives its wizard to reproduce the reference build exactly:
-   - **Components:** only `Display Driver (required)`. Every optional component —
-     Legacy Control Panel, HD Audio via HDMI, VC++ 2017 runtimes, PhysX, USB-C,
-     FrameView, Quadro View, Virtual Audio, Telemetry, NV Platform Controllers,
-     DLSSR and the whole NV App block — is left out.
-   - **Installation Tweaks:** Disable Installer Telemetry & Advertising, Unattended
-     Express Install, Allow automatic reboot, Perform a Clean Installation, Disable
-     Ansel, Show Expert Tweaks, Disable Driver Telemetry, Disable NVIDIA HD Audio
-     sleep timer, Enable MSI, Disable HDCP, Rebuild digital signature,
-     Easy-Anti-Cheat-compatible method, Auto-accept the "driver unsigned" warning.
-2. If the GUI path fails for any reason, a **deterministic fallback** downloads the
-   official NVIDIA DCH package, unpacks it, prunes it to `Display.Driver`, applies the
-   same tweaks as INF edits and re-signs it with a locally generated certificate.
-3. Injects the result into the ISO: the driver goes into the offline `install.wim`
-   DriverStore, and the driver, its certificate and an installer are also staged and
-   run from `SetupComplete.cmd`, so the driver is trusted and installed on first boot.
+1. Downloads the official NVIDIA DCH package for that version (SHA256-checked by size
+   and extracted with 7-Zip) and prunes it down to `Display.Driver`, so every optional
+   component — Legacy Control Panel, HD Audio via HDMI, VC++ 2017 runtimes, PhysX,
+   USB-C, FrameView, Quadro View, Virtual Audio, Telemetry, NV Platform Controllers,
+   DLSSR and the whole NV App block — is left out. The reference **Installation
+   Tweaks** are applied as INF/registry edits:
+   - Disable Installer Telemetry & Advertising, Unattended Express Install, Allow
+     automatic reboot, Perform a Clean Installation, Disable Ansel, Show Expert
+     Tweaks, Disable Driver Telemetry, Disable NVIDIA HD Audio sleep timer, Enable MSI,
+     Disable HDCP, Rebuild digital signature, Easy-Anti-Cheat-compatible method,
+     Auto-accept the "driver unsigned" warning.
+2. Rebuilds the driver catalog with `inf2cat` and re-signs the package with a locally
+   generated certificate, because the INF edits invalidate NVIDIA's own signature.
+   The signing certificate is trusted inside the image so the driver loads without a
+   prompt.
+3. Injects it into the ISO: the driver goes into the offline `install.wim` DriverStore,
+   and the driver, its certificate and an installer are also staged and run from
+   `SetupComplete.cmd`, so the driver is trusted and installed on first boot.
 
 The build report is uploaded as an artifact (`nvidia-driver-buildinfo.json`).
+
+### Choosing the build path
+
+The **`nvidia_driver_method`** input selects how the driver is produced:
+
+| Value | Behaviour |
+|---|---|
+| `fallback` *(default)* | Deterministic: download the official package and prune it. Reproducible and testable. |
+| `gui` | Try to drive the NVCleanstall wizard first (using the copy vendored at `tools/NVCleanstall_1.19.0.exe`), then fall back if that fails. |
+| `auto` | Defer to `config/nvidia_driver_profile.json`. |
+
+The GUI path is **not the default, and `gui.enabled` is `false` in the profile**, because
+it cannot complete unattended: on a clean machine NVCleanstall's first page expects a
+driver it downloads through its own wizard, and its component/tweak pages are
+owner-drawn Delphi (VCL) controls rather than standard Win32 dialogs, so the selection
+cannot be verified from CI. Both paths produce the same debloated component set; the
+deterministic one is simply the one that can be trusted to finish.
 
 ### Caveats
 
@@ -100,21 +117,29 @@ The build report is uploaded as an artifact (`nvidia-driver-buildinfo.json`).
 - The tweaks change the driver's INF, which invalidates NVIDIA's signature — that is
   why the driver is re-signed. The re-signed driver is trusted inside the image, but it
   is **not** the same as NVIDIA's own signed package; treat it accordingly.
-- The GUI path drives a third-party Windows app that can change between versions. If it
-  stops working, the deterministic fallback takes over.
+- **The INF-level tweaks need the Windows Driver Kit.** Editing the INF invalidates
+  NVIDIA's catalog, and a driver whose catalog does not match will **not** install from
+  the DriverStore at all. So the tweaks are only baked into the INF when both
+  `inf2cat.exe` (WDK) and `signtool.exe` (SDK) are present, which is why the build job
+  is pinned to `windows-2022` — `windows-latest` now resolves to the `windows-2025`
+  image, which carries only the WDK Visual Studio extension and no `inf2cat.exe`. When
+  that tooling is missing the engine leaves the INF untouched so NVIDIA's own signature
+  stays valid: the driver still installs, it just doesn't carry the INF-level tweaks.
+  The build report records which path was taken in `tweaks_in_inf`.
+- Re-signing needs `signtool.exe` (Windows SDK, present on the runners).
 - Builds that leave the input blank are unaffected.
 
 ### Locally
 
 ```powershell
-# Build the debloated driver on its own (uses tools/NVCleanstall_1.19.0.exe)
+# Build the debloated driver on its own (deterministic path, the default)
 .\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36
+
+# Try the NVCleanstall GUI first, falling back if it fails
+.\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36 -Method gui
 
 # Point at a different NVCleanstall build
 .\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36 -NvCleanstallPath D:\Drivers\NVCleanstall_1.19.0.exe
-
-# Skip the NVCleanstall GUI and use the deterministic fallback
-.\scripts\nvidia-driver-builder.ps1 -DriverVersion 566.36 -SkipGui
 
 # Inject it during a Core-Gaming build
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
