@@ -345,7 +345,10 @@ jobs:
           $sizeMB = [math]::Round($sum / 1MB, 1)
           Write-Output "NVIDIA driver built: $driverDir ($infCount display INFs, $sizeMB MB)"
 
+          # Exported so the ISO-naming step can put the driver + version in the
+          # output filename, and the verification notes can record it.
           Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_PATH=$driverDir"
+          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_VERSION=$version"
 
       - name: Display build warnings
         shell: pwsh
@@ -638,7 +641,16 @@ jobs:
           $edition = "$env:EDITION_NAME"
           $date = "$env:BUILD_DATE"
 
-          $isoName = "Tiny11CoreGaming-$version-$buildNumber-$language-$edition-$date.iso"
+          # When an NVIDIA driver was built and injected, name the ISO after it
+          # and carry the driver version, so a driver-baked image can never be
+          # mistaken for a plain Core-Gaming one. Unset input => no tag, and the
+          # filename stays exactly as it was before.
+          $nvidiaTag = ""
+          if ($env:NVIDIA_DRIVER_VERSION) {
+            $nvidiaTag = "-NVIDIA-Driver-$($env:NVIDIA_DRIVER_VERSION)"
+          }
+
+          $isoName = "Tiny11CoreGaming-$version-$buildNumber-$language-$edition$nvidiaTag-$date.iso"
           # EXPERIMENTAL: distinct tag prefix so this can never collide with the
           # production Core-Gaming release tag.
           $baseTag = "$buildNumber-coregaming-exp-$($edition.ToLower())"
@@ -681,6 +693,7 @@ jobs:
           WinRE: $(if ("${{ github.event.inputs.preserve_winre }}" -eq "true") { "Preserved" } else { "Removed (stub)" })
           .NET 3.5: ${{ github.event.inputs.enable_dotnet35 }}
           HAGS: ${{ github.event.inputs.hags }}
+          NVIDIA Driver: $(if ($env:NVIDIA_DRIVER_VERSION) { "included - debloated $($env:NVIDIA_DRIVER_VERSION), staged at C:\Windows\Tiny11Nvidia" } else { "not included" })
 
           SECURITY FEATURES DISABLED
             VBS / Memory Integrity / Credential Guard : ${{ github.event.inputs.disable_security_mitigations }}
@@ -706,6 +719,7 @@ jobs:
           Write-Output "=== TINY11 CORE-GAMING BUILD SUMMARY ==="
           Write-Output "Build completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Output "Output size: ${sizeGB}GB"
+          Write-Output "NVIDIA driver: $(if ($env:NVIDIA_DRIVER_VERSION) { $env:NVIDIA_DRIVER_VERSION } else { 'not included' })"
           Write-Output "SHA256: $sha256"
           Write-Output "========================================"
 

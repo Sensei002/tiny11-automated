@@ -858,6 +858,77 @@ function Patch-ReAgentXml {
     }
 }
 
+function Remove-TreeForcefully {
+    # Deletes a directory tree that Windows has made hostile to a plain
+    # `Remove-Item -Recurse -Force`. Returns $true once the path is gone.
+    #
+    # Why this exists: DISM /Add-Driver (used by the NVIDIA injection) services
+    # the offline image, which materialises newer component versions into WinSxS.
+    # Those arrive owned by TrustedInstaller, carrying the ReadOnly attribute,
+    # and their folder names are long enough to push member files to *exactly*
+    # 260 characters. Each of those defeats a different part of a naive delete:
+    #
+    #   * DeleteFile returns ACCESS_DENIED for a ReadOnly file even when the ACL
+    #     grants delete, and Remove-Item's -Force cannot always clear the
+    #     attribute first.
+    #   * takeown/icacls use the legacy path APIs, so they silently skip anything
+    #     at or over MAX_PATH (icacls /C just keeps going) - which is why the
+    #     takeown+icacls pass earlier in Optimize-WinSxS did not save the delete.
+    #   * Files still held by the servicing stack need a retry.
+    #
+    # So: operate on a \\?\ extended-length path, take ownership using the
+    # locale-independent Administrators SID, clear the attributes, then delete
+    # through several mechanisms with backoff.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$MaxAttempts = 3
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+    $long     = if ($Path.StartsWith('\\?\')) { $Path } else { "\\?\$Path" }
+    $adminSid = '*S-1-5-32-544'   # BUILTIN\Administrators, locale independent
+
+    # Cheap attempt first - this is all a healthy tree ever needs.
+    try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop } catch { }
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+    # Every native tool below reports trouble on stderr. Under the script-level
+    # $ErrorActionPreference = 'Stop', PowerShell 5.1 promotes redirected native
+    # stderr into a *terminating* error, which would abort the cleanup instead of
+    # letting the next strategy try. Scope it down for the duration.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+            Write-Log "Force-deleting tree (attempt $attempt/$MaxAttempts): $Path" "WARN"
+
+            & takeown.exe /F $long /R /A /D Y 2>&1 | Out-Null
+            & icacls.exe  $long /grant "${adminSid}:(F)" /T /C /Q 2>&1 | Out-Null
+
+            # attrib.exe handles the bulk quickly; the .NET pass afterwards
+            # covers whatever attrib could not reach (it cannot take a \\?\).
+            & cmd.exe /c "attrib -R -S -H `"$long\*`" /S /D" 2>&1 | Out-Null
+            Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+                ForEach-Object { try { $_.Attributes = [System.IO.FileAttributes]::Normal } catch { } }
+
+            try { Remove-Item -LiteralPath $long -Recurse -Force -ErrorAction Stop } catch { }
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+            # cmd's rd walks the tree through a different code path and copes
+            # with some leftovers the .NET provider will not.
+            & cmd.exe /c "rd /s /q `"$long`"" 2>&1 | Out-Null
+            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+            if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds (5 * $attempt) }
+        }
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
+
+    return (-not (Test-Path -LiteralPath $Path))
+}
+
 function Optimize-WinSxS {
     Write-Log "Optimizing WinSxS folder (this is a CORE feature)..."
 
@@ -958,10 +1029,19 @@ function Optimize-WinSxS {
     }
 
     Write-Log "Replacing WinSxS with minimal version..."
-    Remove-Item -Path $sourceDirectory -Recurse -Force
-    Rename-Item -Path $destinationDirectory -NewName "WinSxS"
-
-    Write-Log "WinSxS optimization complete"
+    if (Remove-TreeForcefully -Path $sourceDirectory) {
+        Rename-Item -Path $destinationDirectory -NewName "WinSxS"
+        Write-Log "WinSxS optimization complete"
+    } else {
+        # Do not throw away a ~25 minute build over one stubborn file. Drop the
+        # staging copy and keep the original WinSxS, which still yields a valid
+        # image - just a much larger one. Warned loudly so it can never be
+        # mistaken for a normal Core build.
+        Write-Log "Could not remove the original WinSxS tree - SKIPPING WinSxS optimization. The resulting ISO will be much larger than a normal Core build." "WARN"
+        if (-not (Remove-TreeForcefully -Path $destinationDirectory)) {
+            Write-Log "Could not remove the WinSxS_edit staging tree either; the ISO will be larger still." "WARN"
+        }
+    }
 }
 
 function Load-RegistryHives {
