@@ -156,6 +156,12 @@ on:
         required: false
         default: true
 
+      # ---------------- Experimental features ----------------
+      nvidia_driver_version:
+        description: 'EXPERIMENTAL: NVIDIA driver version to download, debloat and inject into the ISO (e.g. 582.28). Leave blank to skip the step entirely and leave the image untouched.'
+        required: false
+        default: ''
+
 env:
   ARIA2C_CONNECTIONS: '16'
   ARIA2C_SPLIT: '16'
@@ -163,7 +169,11 @@ env:
 
 jobs:
   build-tiny11-core-gaming-experimental:
-    runs-on: windows-latest
+    # EXPERIMENTAL: pinned to windows-2022 because it ships the full Windows Driver
+    # Kit (inf2cat.exe) that the NVIDIA driver re-signing stage needs. windows-latest
+    # resolves to windows-2025, which only has the WDK Visual Studio extension.
+    # The production workflow stays on windows-latest.
+    runs-on: windows-2022
     timeout-minutes: 480
     permissions:
       contents: write
@@ -299,6 +309,43 @@ jobs:
           Write-Output "Installing aria2c for faster downloads..."
           choco install aria2 -y --no-progress
           aria2c --version
+
+      - name: Build NVIDIA driver (optional)
+        if: ${{ github.event.inputs.nvidia_driver_version != '' }}
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.nvidia_driver_version }}".Trim()
+          Write-Output "Requested NVIDIA driver version: $version"
+
+          $outputDir = Join-Path $PWD 'nvidia-driver'
+          $workDir   = Join-Path $PWD 'nvidia-driver-work'
+
+          # Splat a HASHTABLE, not an array. Array splatting binds positionally and
+          # would silently mis-bind these named parameters onto the wrong ones.
+          $params = @{
+            DriverVersion = $version
+            OutputDir     = $outputDir
+            WorkDir       = $workDir
+          }
+
+          & .\scripts\nvidia-driver-builder.ps1 @params
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "nvidia-driver-builder.ps1 failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+
+          $driverDir = Join-Path $outputDir 'driver'
+          if (-not (Test-Path $driverDir)) {
+            Write-Error "Driver output folder was not produced: $driverDir"
+            exit 1
+          }
+
+          $infCount = @(Get-ChildItem -Path $driverDir -Filter '*.inf' -File).Count
+          $sum = (Get-ChildItem -Path $driverDir -Recurse -File | Measure-Object Length -Sum).Sum
+          $sizeMB = [math]::Round($sum / 1MB, 1)
+          Write-Output "NVIDIA driver built: $driverDir ($infCount display INFs, $sizeMB MB)"
+
+          Add-Content -Path $env:GITHUB_ENV -Value "NVIDIA_DRIVER_PATH=$driverDir"
 
       - name: Display build warnings
         shell: pwsh
@@ -460,6 +507,14 @@ jobs:
           if ("${{ github.event.inputs.skip_cleanup }}" -eq "true") {
             $params.SkipCleanup = $true
             Write-Output "Cleanup will be skipped (debugging mode)"
+          }
+
+          # Set by the "Build NVIDIA driver (optional)" step. Absent when the
+          # nvidia_driver_version input was left blank, in which case the image is
+          # built exactly as before with no NVIDIA driver work.
+          if ($env:NVIDIA_DRIVER_PATH) {
+            $params.NvidiaDriverPath = $env:NVIDIA_DRIVER_PATH
+            Write-Output "NVIDIA driver injection: $env:NVIDIA_DRIVER_PATH"
           }
 
           $enableDotNet = [System.Boolean]::Parse("${{ github.event.inputs.enable_dotnet35 }}")
@@ -850,6 +905,8 @@ jobs:
           path: |
             scripts/tiny11core-gaming-buildinfo.json
             config/gaming_profile.json
+            nvidia-driver/nvidia-driver-buildinfo.json
+            config/nvidia_driver_profile.json
           retention-days: 30
           if-no-files-found: warn
 
