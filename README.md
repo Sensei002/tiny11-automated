@@ -108,6 +108,7 @@ This project is based on the original [tiny11 builder by ntdevlabs](https://gith
 
 <a href="https://sourceforge.net/p/tiny-11-releases/"><img alt="Download Tiny 11 Releases" src="https://sourceforge.net/sflogo.php?type=18&amp;group_id=3937094" width=200></a>
 - **Pre-built ISOs**: [SourceForge](https://sourceforge.net/projects/tiny-11-releases/files/) (Primary source)
+- **Sensei's Pre Built ISO**: [SourceForge](https://sourceforge.net/projects/tiny11-automated/files/)
 - **Release Notes**: [GitHub Releases](https://github.com/kelexine/tiny11-automated/releases)
 - **Source Code**: [GitHub Repository](https://github.com/kelexine/tiny11-automated)
 
