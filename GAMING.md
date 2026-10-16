@@ -42,7 +42,8 @@ skips that group entirely; it does not half-apply.
 
 ```powershell
 # Full Core-Gaming build for competitive esports
-.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender -PreserveWinRE
+# (Defender and the whole Windows Update stack are removed automatically)
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -PreserveWinRE
 
 # Dial a few groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
@@ -120,6 +121,33 @@ deliberately overrides four of its choices:
 | `SystemResponsiveness` | 0 | **10** (AtlasOS value) |
 | Fullscreen Optimizations | on | **off** |
 | HAGS | forced on | **toggleable** |
+
+### Defender and Windows Update are removed, not disabled
+
+Core-Gaming always removes both. This is **not** a group toggle — `-GamingGroups` cannot
+turn it off. Build a plain Core image if you want either kept.
+
+**Windows Defender / Security.** A plain Core build only *disables* the Defender services,
+which is worse than it sounds: Security Center notices antivirus is off and starts nagging
+with "Turn on Windows Security". Core-Gaming instead removes the Defender feature package,
+the Windows Security app, the on-disk definition store and the Security Health tray agent,
+and deletes the `WinDefend` / `WdNisSvc` / `WdFilter` / `Sense` / `SecurityHealthService`
+service keys outright. `wscsvc` (Security Center) and the System Guard services are disabled
+rather than deleted, because they are shared Windows plumbing.
+
+**Windows Update.** Disabling `wuauserv` alone does not hold on modern Windows, and it is
+why a Core image can still show *"Updates are underway, do not turn off your PC"* on restart:
+
+- `WaaSMedicSvc` (Windows Update Medic) exists specifically to detect a disabled or broken
+  Windows Update and **put it back**.
+- `UsoSvc` (Update Orchestrator) runs the servicing pass at boot.
+
+Core-Gaming deletes all three service keys, removes the Update Orchestrator scheduled tasks,
+sets `NoAutoUpdate`, and hides the Windows Update and Windows Security pages in Settings.
+
+`wuaueng.dll` and `wuapi.dll` are deliberately **left in place** — other inbox components
+link them, and a missing DLL fails hard rather than degrading. With the services gone,
+Windows Update cannot run regardless.
 
 ---
 
@@ -278,8 +306,8 @@ runtime, install the redistributable once:
 | Printing of any kind | `disable_printing` |
 | Windows Search indexing (Start-menu search quality drops) | `strip_background_noise` |
 | Bluetooth devices | `strip_background_noise` |
-| Windows Update (already true for Core) | Core baseline |
-| Windows Defender | `-RemoveDefender` (only if you pass it) |
+| Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings page | Always removed on a Core-Gaming build |
+| Windows Defender / Windows Security Center | Always removed on a Core-Gaming build |
 | Memory Integrity / Core Isolation UI | `disable_security_mitigations` |
 
 Steam, Ubisoft Connect and Epic titles are unaffected by the Xbox removal.
@@ -308,7 +336,8 @@ Balanced.
 
 **Not reversible from inside Windows** — the script tells you this too:
 
-- Windows Defender, if it was removed with `-RemoveDefender`
+- Windows Defender and Windows Update — both are always removed on a Core-Gaming
+  build, so there is nothing left to switch back on
 - The printing optional features
 - The removed Xbox AppX packages
 - The `bcdedit` mitigation flags (changeable with `bcdedit`, but not by this script)

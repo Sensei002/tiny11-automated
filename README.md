@@ -291,6 +291,7 @@ Siege on a CPU-bound machine.
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
+| **Defender & Update** | Windows Defender / Security **removed outright**, plus the entire Windows Update stack — service, Update Medic, Update Orchestrator and the Settings page. Always on for Core-Gaming; not a group toggle |
 
 Game runtimes (VC++, DirectX 9.0c, .NET Desktop) are deliberately **not** bundled — see
 [GAMING.md](GAMING.md#game-runtimes) for why and what to install yourself.
@@ -304,8 +305,8 @@ can dial any of it back per build.
 **Locally:**
 
 ```powershell
-# Full Core-Gaming build
-.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender -PreserveWinRE
+# Full Core-Gaming build (Defender + Windows Update are removed automatically)
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -PreserveWinRE
 
 # Dial specific groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
@@ -553,7 +554,8 @@ account screen.
 - Steps Recorder
 - LA57 CPU compatibility layer
 - Language features (OCR, Speech, Handwriting)
-- Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input)
+- Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input; always removed on Core-Gaming)
+- Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings page (Core-Gaming only; a plain Core build only disables it)
 - Printer drivers (Nano only)
 - Scanner/MFD drivers (Nano only)
 
@@ -815,6 +817,7 @@ remove_defender:        # 🆕 Completely remove Windows Defender / Security
   type: boolean
   default: false
   # No Antimalware service will be present in the finished image
+  # Redundant on Core-Gaming, which always removes Defender and Windows Update
 
 account_setup:          # 🆕 Local account setup
   type: choice

@@ -31,6 +31,9 @@
     is present in the finished image (optional). Off by default - the standard
     Core build only disables the Defender services.
 
+    A Core-Gaming build (-GamingProfile) always removes Defender / Security, so
+    this switch is redundant there; it stays meaningful for a plain Core build.
+
 .PARAMETER AccountSetup
     How the local account is set up on first boot (optional, default 'auto-admin'):
       auto-admin - pre-create a local administrator called 'Admin', blank password,
@@ -48,6 +51,14 @@
 
     Every tweak is defined in config/gaming_profile.json and can be toggled per
     group with -GamingGroups. See GAMING.md for the full list and the risks.
+
+    On top of the profile, a Core-Gaming build ALWAYS removes Windows Defender /
+    Security and the whole Windows Update stack (service, Update Medic, Update
+    Orchestrator and the Settings page). A Core image is non-serviceable, so both
+    are pure overhead on a latency-first build, and a disabled-but-present Defender
+    is what makes Security Center nag. This is not group-controlled and cannot be
+    turned off with -GamingGroups - build a plain Core image if you want either
+    kept.
 
 .PARAMETER GamingProfileFile
     Path to the gaming profile JSON (optional). Defaults to
@@ -112,14 +123,14 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Preserve winre.wim instead of replacing it with an empty stub. Use this if targeting real hardware or 24H2/25H2 setups to avoid error 0x8007000B.")]
     [switch]$PreserveWinRE,
 
-    [Parameter(Mandatory=$false, HelpMessage="Completely remove Windows Defender / Security so no antimalware service is present in the finished image. Off by default - the standard Core build only disables the Defender services.")]
+    [Parameter(Mandatory=$false, HelpMessage="Completely remove Windows Defender / Security so no antimalware service is present in the finished image. Off by default - the standard Core build only disables the Defender services. A Core-Gaming build always does this, so the switch is redundant there.")]
     [switch]$RemoveDefender,
 
     [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
     [string]$AccountSetup = 'auto-admin',
 
-    [Parameter(Mandatory=$false, HelpMessage="Apply the Tiny11 Core-Gaming profile: AtlasOS-style power scheme, latency-first tweaks, security mitigations off. Layers on top of the Core performance profile. See GAMING.md.")]
+    [Parameter(Mandatory=$false, HelpMessage="Apply the Tiny11 Core-Gaming profile: AtlasOS-style power scheme, latency-first tweaks, security mitigations off. Layers on top of the Core performance profile. Also always removes Windows Defender / Security and the entire Windows Update stack. See GAMING.md.")]
     [switch]$GamingProfile,
 
     [Parameter(Mandatory=$false, HelpMessage="Path to the gaming profile JSON. Defaults to config/gaming_profile.json in the repository root.")]
@@ -657,6 +668,52 @@ function Remove-DefenderPayload {
     Write-Log "Defender / Security payload removal finished"
 }
 
+function Remove-WindowsUpdatePayload {
+    # -GamingProfile only. Payload half of the complete Windows Update removal, so
+    # it runs while the image is mounted but BEFORE its registry hives are loaded.
+    #
+    # The always-on Core pass already deletes usoclient.exe, UsoApiAll.dll,
+    # UsoApi.dll, UpdatePolicy.dll, umbus.sys and Windows\SoftwareDistribution. What
+    # it never touches is the scheduling layer, and that is what actually produces
+    # the boot-time "Updates are underway, do not turn off your PC" screen.
+    Write-Log "Removing the Windows Update payload (GamingProfile)..." "INFO"
+
+    # The Update Orchestrator scheduled tasks are what schedule a servicing pass.
+    # Without these the orchestrator has nothing to run even if its service returns.
+    foreach ($taskFolder in @(
+        'Windows\System32\Tasks\Microsoft\Windows\UpdateOrchestrator',
+        'Windows\System32\Tasks\Microsoft\Windows\WindowsUpdate'
+    )) {
+        $taskPath = Join-Path $scratchDir $taskFolder
+        if (Test-Path $taskPath) {
+            Remove-Item -Path $taskPath -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $taskPath) {
+                Write-Log "Could not delete scheduled task folder: $taskFolder" "WARN"
+            } else {
+                Write-Log "Deleted scheduled task folder: $taskFolder"
+            }
+        }
+    }
+
+    # The remaining Windows Update client executables. Deliberately NOT wuaueng.dll
+    # or wuapi.dll: those are linked by other inbox components, and a missing DLL
+    # fails hard rather than degrading, so removing them risks taking Settings or
+    # the servicing stack down with them. With the service, the medic and the
+    # orchestrator all gone, Windows Update cannot run regardless.
+    foreach ($relative in @(
+        'Windows\System32\wuauclt.exe',
+        'Windows\System32\wuapihost.exe'
+    )) {
+        $binary = Join-Path $scratchDir $relative
+        if (Test-Path $binary) {
+            Remove-Item -Path $binary -Force -ErrorAction SilentlyContinue
+            Write-Log "Deleted Windows Update executable: $relative"
+        }
+    }
+
+    Write-Log "Windows Update payload removal finished"
+}
+
 function Remove-DefenderRegistry {
     # -RemoveDefender only. Registry half of the removal, so it must run AFTER
     # Load-RegistryHives.
@@ -712,6 +769,55 @@ function Remove-DefenderRegistry {
     }
 
     Write-Log "Defender / Security registry removal finished"
+}
+
+function Remove-WindowsUpdateStack {
+    # -GamingProfile only. Registry half of the complete Windows Update removal, so
+    # it must run AFTER Load-RegistryHives.
+    #
+    # The always-on Core tweak sets wuauserv to Start=4 and redirects Windows Update
+    # to localhost. That is NOT sufficient on modern Windows, and it is why a Core
+    # image can still show "Updates are underway, do not turn off your PC":
+    #
+    #   * WaaSMedicSvc (Windows Update Medic) exists specifically to detect a
+    #     disabled or broken Windows Update and put it back.
+    #   * UsoSvc (Update Orchestrator) runs the servicing pass at boot.
+    #
+    # Leave either in place and Windows Update re-arms itself a restart or two
+    # later. The keys are deleted outright rather than set to Start=4, matching how
+    # Remove-DefenderRegistry treats the Defender services.
+    #
+    # DoSvc (Delivery Optimization) is deliberately NOT touched here - it is owned
+    # by the profile's strip_background_noise group, so deleting it unconditionally
+    # would ignore that group's toggle.
+    Write-Log "Removing the Windows Update stack (GamingProfile)..." "INFO"
+
+    foreach ($service in @(
+        'WaaSMedicSvc',   # Windows Update Medic - repairs and re-enables Windows Update
+        'UsoSvc',         # Update Orchestrator - the servicing pass at boot
+        'wuauserv'        # Windows Update
+    )) {
+        $serviceKey = "HKLM:\zSYSTEM\ControlSet001\Services\$service"
+        if (Test-Path $serviceKey) {
+            Remove-Item -Path $serviceKey -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $serviceKey) {
+                Write-Log "Could not delete Windows Update service key (locked or access denied): $service" "WARN"
+            } else {
+                Write-Log "Deleted Windows Update service key: $service"
+            }
+        } else {
+            Write-Log "Windows Update service key not present: $service"
+        }
+    }
+
+    # Policy side, belt and braces alongside the always-on localhost redirect.
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
+
+    # Hide both Settings pages. The always-on Core value uses 'virus', which is not
+    # a Windows 11 page id - the Windows Security page is 'windowsdefender'.
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'
+
+    Write-Log "Windows Update stack removal finished"
 }
 
 function Remove-EdgeAndOneDrive {
@@ -1765,11 +1871,20 @@ try {
         Invoke-GamingOptionalFeatureRemoval -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
     }
 
-    # Defender / Security removal (opt-in via -RemoveDefender). The payload half
-    # runs here, while the image hives are still unloaded; the registry half runs
-    # later, right after Load-RegistryHives.
-    if ($RemoveDefender) {
+    # Defender / Security removal. Opt-in via -RemoveDefender on a plain Core
+    # build; a Core-Gaming build always gets it. A disabled-but-present Defender is
+    # exactly what makes Windows Security Center nag "Turn on Windows Security", and
+    # the gaming profile has already turned the mitigations off anyway.
+    # The payload half runs here, while the image hives are still unloaded; the
+    # registry half runs later, right after Load-RegistryHives.
+    if ($RemoveDefender -or $GamingProfile) {
         Remove-DefenderPayload
+    }
+
+    # Gaming profile: complete Windows Update removal. Payload half, so it runs
+    # while the hives are still unloaded.
+    if ($GamingProfile) {
+        Remove-WindowsUpdatePayload
     }
 
     # .NET 3.5 installation (optional, Core-only)
@@ -1794,9 +1909,16 @@ try {
 
     Load-RegistryHives
     Apply-RegistryTweaks
-    if ($RemoveDefender) {
+    if ($RemoveDefender -or $GamingProfile) {
         Remove-DefenderRegistry
     }
+
+    # Gaming profile: complete Windows Update removal. Registry half. Runs after
+    # Apply-RegistryTweaks so it wins over the always-on Core WU policies.
+    if ($GamingProfile) {
+        Remove-WindowsUpdateStack
+    }
+
     Apply-PerformanceTweaks
 
     # Gaming profile must run AFTER Apply-PerformanceTweaks so it can deliberately

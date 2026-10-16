@@ -100,7 +100,7 @@ on:
         required: false
         default: false
       remove_defender:
-        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image'
+        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender and the whole Windows Update stack.'
         type: boolean
         required: false
         default: false

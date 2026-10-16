@@ -542,3 +542,80 @@ Describe 'Profile engine functional behaviour' {
         { Test-GamingProfile -Profile $bad } | Should -Throw '*missing required key*'
     }
 }
+
+Describe 'Core-Gaming always removes Defender and Windows Update' {
+
+    BeforeAll {
+        $builder = Get-Content -LiteralPath $builderPath -Raw
+        $gamingGate = [regex]::Escape('if ($RemoveDefender -or $GamingProfile) {')
+    }
+
+    It 'defines the Windows Update removal functions' {
+        $builder | Should -Match 'function Remove-WindowsUpdatePayload'
+        $builder | Should -Match 'function Remove-WindowsUpdateStack'
+    }
+
+    It 'calls both halves of the Windows Update removal under the gaming gate' {
+        foreach ($fn in @('Remove-WindowsUpdatePayload', 'Remove-WindowsUpdateStack')) {
+            $callIndex = Get-MainCallIndex -Content $builder -Name $fn
+            $callIndex | Should -BeGreaterThan 0
+
+            # The nearest preceding gate must be the plain -GamingProfile one, not
+            # something weaker that a Core build could also satisfy.
+            $gateIndex = $builder.Substring(0, $callIndex).LastIndexOf('if ($GamingProfile)')
+            $gateIndex | Should -BeGreaterThan 0
+            ($callIndex - $gateIndex) | Should -BeLessThan 200
+        }
+    }
+
+    It 'deletes the three services that make a WU disable stick' {
+        # WaaSMedicSvc repairs a disabled Windows Update, UsoSvc runs the boot
+        # servicing pass, wuauserv is Windows Update itself. Leaving any of them is
+        # what lets "Updates are underway, do not turn off your PC" come back.
+        foreach ($service in @('WaaSMedicSvc', 'UsoSvc', 'wuauserv')) {
+            $builder | Should -Match ([regex]::Escape("'$service'"))
+        }
+    }
+
+    It 'removes the Update Orchestrator scheduled tasks' {
+        $builder | Should -Match ([regex]::Escape('Tasks\Microsoft\Windows\UpdateOrchestrator'))
+    }
+
+    It 'sets the NoAutoUpdate policy' {
+        $builder | Should -Match ([regex]::Escape("WindowsUpdate\AU' 'NoAutoUpdate'"))
+    }
+
+    It 'hides both Settings pages using valid Windows 11 page ids' {
+        # The always-on Core value uses 'virus', which is not a page id; the Windows
+        # Security page is 'windowsdefender'.
+        $builder | Should -Match 'hide:windowsupdate;windowsdefender'
+    }
+
+    It 'removes only the WU client executables, not the shared DLLs' {
+        # wuaueng.dll and wuapi.dll are linked by other inbox components and a
+        # missing DLL fails hard, so they are deliberately kept.
+        $builder | Should -Match ([regex]::Escape("'Windows\System32\wuauclt.exe'"))
+        $builder | Should -Match ([regex]::Escape("'Windows\System32\wuapihost.exe'"))
+        $builder | Should -Not -Match ([regex]::Escape("'Windows\System32\wuaueng.dll'"))
+        $builder | Should -Not -Match ([regex]::Escape("'Windows\System32\wuapi.dll'"))
+    }
+
+    It 'removes Defender on a Core-Gaming build, not only with -RemoveDefender' {
+        $builder | Should -Match $gamingGate
+        ([regex]::Matches($builder, $gamingGate)).Count | Should -Be 2
+    }
+
+    It 'leaves the plain Core Windows Update disable exactly as it was' {
+        # Regression guard: a plain Core build must keep the weaker localhost +
+        # Start=4 disable, including the original SettingsPageVisibility value.
+        $builder | Should -Match ([regex]::Escape("Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess'"))
+        $builder | Should -Match ([regex]::Escape("'HKLM\zSYSTEM\ControlSet001\Services\wuauserv' 'Start' 'REG_DWORD' '4'"))
+        $builder | Should -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:virus;windowsupdate'"))
+    }
+
+    It 'does not touch DoSvc, which belongs to the profile groups' {
+        # DoSvc is owned by strip_background_noise, so an unconditional delete here
+        # would ignore that group's toggle.
+        $builder | Should -Not -Match ([regex]::Escape("'DoSvc'"))
+    }
+}
