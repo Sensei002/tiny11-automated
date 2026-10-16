@@ -30,9 +30,9 @@ on:
         required: false
         default: '26H2'
       windows_iso_url:
-        description: 'Windows 11 ISO download URL'
+        description: 'Windows 11 ISO download URL (Microsoft links expire ~24h - refresh before each run)'
         required: true
-        default: 'https://software.download.prss.microsoft.com/dbazure/Windows11_Client_x64_en-us_26300_9457.iso?t=80c8fc30-ff56-4c95-8024-adc31f3918cb&P1=1791748912&P2=602&P3=2&P4=iVKrQtUXouUQIrGM81OYIB8hRan2qtmXe2qAIEU3Yt4EcqV0aHWqRtPrWr3q%2bwB2mhxz9795hHc%2bNp1MsjJjJU9mIL5SZPD13Aw1ZxH5O6oANHYS84G3k%2f0JZbPiBIe5%2bG8CpdpAJhq6n5yzYgajyGkmgvmVYmidHOPO3BehAgfu3hwqFk9uozIrikhCkr2Rk6u6yT4%2f1Al4V5duQjJUDqT2irslL%2fRe5qh1wRH%2bADoHxUsN%2fIJt6yzx%2fRa5%2fx9n7nJTIjOj7Dlg1Zdf1oc%2bES4JSzrur6TRuGjTZAVSKSyobiBJAe3s6FkhW7boGWvUzdyHF2qc%2fBNhjuJPh9HB0g%3d%3d'
+        default: 'https://software.download.prss.microsoft.com/dbazure/Windows11_Client_x64_en-us_26300_9457.iso?t=5aba2b9f-4d84-435e-979b-9930114d06d3&P1=1792218880&P2=602&P3=2&P4=JeiqZyFHcMwlscEpiBPYVrdYoGzWEMaRA6F0wsGrDrb7b1qw5Ed02Srh9rQpxPuuxuZ2hyZxcGXsGpKBZj520%2fibMJymkjAvCjfoTTa%2fSE5GrC5xLAW3IxaXN8lNMOfXseDR9A1%2bfJk1fiac%2bdPdVt8BNDJ5Lbgfxi13uTj3%2bE%2bt6K%2fx2MKAw0FqzQIm%2bEz0mlswLUfDNY1aJpgP6US2AxnNMYHfQ1QbMBF4j8hAZFoL9hwbgsadfxAWcb7eNICftVLhwGNXZDzKm1RGucA36el4WTXo0HFwgjiAhX1LwnmiJzCOFakGW5vjEf6TznlX%2fYBbCQ2hMxQ5B0dpvtLjog%3d%3d'
       windows_build:
         description: 'Fallback Windows build number (e.g. 26200.8655) — only used if it cannot be read directly from the ISO'
         required: false
@@ -374,6 +374,40 @@ jobs:
           Write-Output ""
           Write-Output "Build will continue in 10 seconds..."
           Start-Sleep -Seconds 10
+
+      - name: Preflight - validate Windows ISO URL
+        shell: pwsh
+        run: |
+          $url = "${{ github.event.inputs.windows_iso_url }}"
+
+          # Microsoft's dbazure links are signed and time-limited (?t=...&P1=...&P4=...).
+          # They expire roughly 24 hours after generation, and a dead link used to cost a
+          # whole run: the NVIDIA driver build burns ~13 minutes, then the download 403s.
+          # A single HEAD request settles it in under a second and downloads zero bytes.
+          $safeUrl = ($url -split '\?')[0]
+          Write-Output "Checking ISO link: $safeUrl"
+
+          $code = (& curl.exe -s -I -L --max-time 30 -o NUL -w '%{http_code}' "$url").Trim()
+
+          # Some endpoints reject HEAD outright; fall back to a 1-byte ranged GET before
+          # concluding the link is dead, so we never fail a valid URL over a probe quirk.
+          if ($code -notin @('200', '206')) {
+            Write-Output "HEAD returned HTTP $code - retrying with a 1-byte ranged GET..."
+            $code = (& curl.exe -s -L --max-time 30 -r 0-0 -o NUL -w '%{http_code}' "$url").Trim()
+          }
+
+          Write-Output "ISO link responded with HTTP $code"
+
+          if ($code -notin @('200', '206')) {
+            Write-Output "::error title=Expired or invalid ISO URL::The Windows ISO link returned HTTP $code."
+            Write-Output ""
+            Write-Output "Microsoft download links are signed and expire about 24 hours after they are generated."
+            Write-Output "Get a fresh link from https://www.microsoft.com/software-download/windows11 and pass it as"
+            Write-Output "the 'windows_iso_url' input when re-running this workflow."
+            exit 1
+          }
+
+          Write-Output "ISO link is live - proceeding with the download."
 
       - name: Download Windows 11 ISO
         shell: pwsh
