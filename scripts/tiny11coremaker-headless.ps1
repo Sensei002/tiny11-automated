@@ -1538,9 +1538,14 @@ function Apply-PerformanceTweaks {
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Power' 'HiberbootEnabled' 'REG_DWORD' '0'
     # Keep crash dump on BSOD instead of silent auto-reboot — preserves minidump for analysis
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\CrashControl' 'AutoReboot' 'REG_DWORD' '0'
-    # BCD: short boot menu + disable dynamic tick for lower timer interrupt latency (gaming)
+    # BCD: short boot menu + keep the system timer from going tickless while idle.
+    # 'useplatformtick yes' used to be set here as well. It forces the platform
+    # timer (HPET-class) as the tick source, which makes every timer read more
+    # expensive than the invariant TSC and can raise DPC cost - the opposite of
+    # what a latency-first build wants. It is now deleted instead, so images built
+    # from an older revision get corrected too.
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneBCD' 'REG_SZ' `
-        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /set disabledynamictick yes 2>&1 | Out-Null; & bcdedit /set useplatformtick yes 2>&1 | Out-Null"'
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /set disabledynamictick yes 2>&1 | Out-Null; & bcdedit /deletevalue useplatformtick 2>&1 | Out-Null"'
 
     Write-Log "Performance optimizations applied (gaming/VM profile)"
 }

@@ -283,10 +283,11 @@ Siege on a CPU-bound machine.
 
 | Area | Changes |
 |------|---------|
-| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle |
+| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle, plus the energy-performance preference and boost policy that HWP/CPPC CPUs actually act on, and no storage-link power saving |
 | **CPU** | Power throttling off, `SystemResponsiveness` = 10 (AtlasOS value) |
 | **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
-| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on |
+| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on with VRR optimisation on · USB 3 link power management off |
+| **Device latency** | At first boot, on the live machine: **MSI interrupts** with high priority for GPU and NIC, NIC interrupt moderation off, RSS on, EEE / flow control / RSC / LSO off, USB and HID power management off. This is the layer that moves **1% lows** rather than average FPS — see [GAMING.md](GAMING.md#device-latency-and-1-lows) |
 | **Display** | Fullscreen Optimizations **off** (true fullscreen exclusive) |
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |

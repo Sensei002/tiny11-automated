@@ -127,6 +127,21 @@ Describe 'Gaming profile JSON' {
         $profile.defaultGroups.disable_fso                 | Should -BeTrue
     }
 
+    It 'enables the device-latency group by default' {
+        $profile.defaultGroups.interrupt_latency | Should -BeTrue
+    }
+
+    It 'leaves VRR optimisation ON in the DirectX global settings' {
+        # It was 0 in an earlier revision. 0 tells DWM not to align presentation to the
+        # display's refresh window, which is the opposite of what frame pacing wants.
+        $entry = $profile.registry |
+            Where-Object { $_.name -eq 'DirectXUserGlobalSettings' }
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.value | Should -Match 'SwapEffectUpgradeEnable=1'
+        $entry.value | Should -Match 'VRROptimizeEnable=1'
+        $entry.value | Should -Not -Match 'VRROptimizeEnable=0'
+    }
+
     It 'sets SystemResponsiveness to the AtlasOS value of 10' {
         $entry = $profile.registry |
             Where-Object { $_.name -eq 'SystemResponsiveness' }
@@ -256,6 +271,37 @@ Describe 'Gaming power settings JSON' {
         @($power.bcd).Count | Should -BeGreaterThan 0
         ($power.bcd | Where-Object { $_.args -match 'hypervisorlaunchtype off' }) | Should -Not -BeNullOrEmpty
     }
+
+    It 'sets the energy-performance preference and boost policy under disable_cpu_idle' {
+        $epp = $power.settings | Where-Object { $_.setting -eq '36687f9e-e3a5-4dbf-b1dc-15eb381c6863' }
+        $epp | Should -Not -BeNullOrEmpty
+        $epp.ac | Should -Be 0
+        $epp.group | Should -Be 'disable_cpu_idle'
+        $epp.beyondAtlas | Should -BeTrue
+
+        $boost = $power.settings | Where-Object { $_.setting -eq '45bcc044-d885-43e2-8605-ee0ec6e96b59' }
+        $boost | Should -Not -BeNullOrEmpty
+        $boost.ac | Should -Be 100
+        $boost.group | Should -Be 'disable_cpu_idle'
+    }
+
+    It 'keeps the storage and USB links out of low-power states' {
+        $ahci = $power.settings | Where-Object { $_.setting -eq '0b2d69d7-a2a1-449c-9680-f91c70521c60' }
+        $ahci | Should -Not -BeNullOrEmpty
+        $ahci.ac | Should -Be 0
+
+        $usb3 = $power.settings | Where-Object { $_.setting -eq 'd4e98f31-5ffe-4ce1-be31-1b38b384c009' }
+        $usb3 | Should -Not -BeNullOrEmpty
+        $usb3.ac | Should -Be 0
+        $usb3.group | Should -Be 'latency_input_tweaks'
+    }
+
+    It 'deletes useplatformtick instead of setting it' {
+        # Forcing the platform tick source is slower than the invariant TSC, so the
+        # profile must never re-introduce it.
+        ($power.bcd | Where-Object { $_.args -match '/set\s+useplatformtick\s+yes' }) | Should -BeNullOrEmpty
+        ($power.bcd | Where-Object { $_.args -match '/deletevalue\s+useplatformtick' }) | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe 'Gaming profile engine' {
@@ -365,6 +411,35 @@ Describe 'First-boot and undo scripts' {
         $content | Should -Match 'powercfg -duplicatescheme'
         $content | Should -Match 'powercfg -changename'
         $content | Should -Match 'powercfg -setactive'
+    }
+
+    It 'first-boot script applies the device-latency layer' {
+        $content = Get-Content -LiteralPath $firstBootPath -Raw
+        foreach ($fn in @(
+            'Set-GamingInterruptLatency', 'Set-GamingNetworkAdapter',
+            'Set-GamingUsbPower', 'Set-GamingMemoryCompression'
+        )) {
+            $content | Should -Match ("function\s+$([regex]::Escape($fn))\b")
+        }
+    }
+
+    It 'only enables MSI where the driver already publishes MSI properties' {
+        # This is the safety property: forcing MSI on a device that cannot do it is how
+        # a latency tweak turns into a machine that will not boot.
+        $content = Get-Content -LiteralPath $firstBootPath -Raw
+        $content | Should -Match 'MessageSignaledInterruptProperties'
+        $content | Should -Match 'Test-Path -LiteralPath \$msiKey'
+    }
+
+    It 'honours group gating for bcdedit entries' {
+        $content = Get-Content -LiteralPath $firstBootPath -Raw
+        $content | Should -Match '\$entry\.group'
+        $content | Should -Match '-Groups \$groups'
+    }
+
+    It 'core builder no longer sets useplatformtick' {
+        $content = Get-Content -LiteralPath $builderPath -Raw
+        $content | Should -Not -Match 'bcdedit /set useplatformtick yes'
     }
 
     It 'undo script reads its instructions from the bundled profile' {

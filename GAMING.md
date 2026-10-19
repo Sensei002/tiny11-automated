@@ -16,6 +16,7 @@ Rainbow Six Siege on a CPU-bound machine.
 - [Building it](#building-it)
 - [What gets applied](#what-get-applied)
 - [The power scheme](#the-power-scheme)
+- [Device latency and 1% lows](#device-latency-and-1-lows)
 - [Instant window response](#instant-window-response)
 - [Game runtimes](#game-runtimes)
 - [What breaks](#what-breaks)
@@ -63,12 +64,17 @@ engine is only dot-sourced when the switch is present.
 Everything below lives in [`config/gaming_profile.json`](config/gaming_profile.json).
 Group names match the workflow input names exactly.
 
+> **Input budget.** `workflow_dispatch` allows at most 25 inputs, and this workflow is
+> now at 25 (10 inherited from Core, 15 gaming). A new group can no longer be exposed as
+> a toggle without removing one — fold new tweaks into an existing group, or move the
+> toggle surface to a config file.
+
 ### Power & CPU
 
 | Group | What it does |
 |---|---|
-| `atlas_power_scheme` | Creates and activates a new power scheme (see [below](#the-power-scheme)), disables hibernation and power throttling, and sets MMCSS `SystemResponsiveness` to 10 |
-| `disable_cpu_idle` | Forces the CPU to stay in C-State 0 — no idle states, so there is no C-State wake penalty on a frame spike |
+| `atlas_power_scheme` | Creates and activates a new power scheme (see [below](#the-power-scheme)), disables hibernation and power throttling, keeps the storage link out of low-power states, and sets MMCSS `SystemResponsiveness` to 10 |
+| `disable_cpu_idle` | Forces the CPU to stay in C-State 0 — no idle states, so there is no C-State wake penalty on a frame spike. Also sets the energy-performance preference to 0 and the boost policy to 100, which is the hint HWP/CPPC parts actually act on |
 
 ### Security (the aggressive part)
 
@@ -82,7 +88,8 @@ Group names match the workflow input names exactly.
 |---|---|
 | `network_latency_tweaks` | Nagle's algorithm off (global + per-adapter at first boot), QoS reserved bandwidth set to 0, Delivery Optimization P2P off, WU auto-reboot blocked |
 | `disable_mpo` | Disables Multi-Plane Overlay (`Dwm\OverlayTestMode=5`) — the standard fix for flicker and micro-stutter on some NVIDIA/AMD drivers |
-| `latency_input_tweaks` | Mouse acceleration off, Sticky Keys / Toggle Keys hotkeys off, DXGI flip model enabled |
+| `latency_input_tweaks` | Mouse acceleration off, Sticky Keys / Toggle Keys hotkeys off, DXGI flip model enabled with VRR optimisation on, USB 3 link power management off |
+| `interrupt_latency` | Per-device work that only exists on a live machine: MSI interrupts with high priority, NIC interrupt moderation off / RSS on / EEE and flow control off, USB and HID power management off — see [Device latency](#device-latency-and-1-lows) |
 | `disable_fso` | Forces true fullscreen exclusive instead of Fullscreen Optimizations |
 
 ### Behaviour
@@ -90,7 +97,7 @@ Group names match the workflow input names exactly.
 | Group | What it does |
 |---|---|
 | `disable_game_mode` | Turns Windows Game Mode **off** — see the note below |
-| `strip_background_noise` | Windows Search indexing off, Bluetooth off, Delivery Optimization service off, background apps globally denied, visual effects off, scripted diagnostics off |
+| `strip_background_noise` | Windows Search indexing off, Bluetooth off, Delivery Optimization service off, background apps globally denied, visual effects off, scripted diagnostics off, memory compression off on 16 GB+ machines |
 | `instant_windows` | Removes window/menu/hover animations and shell delays, and shortens the app-close timeouts — see [Instant window response](#instant-window-response) |
 | `disable_fast_startup` | Hibernation and Fast Startup off |
 | `disable_printing` | Print services disabled **and** the printing optional features removed from the image |
@@ -113,7 +120,7 @@ see [Customising](#customising-without-editing-powershell).
 ### Overrides of the Core defaults
 
 The Core builder already applies an aggressive performance profile. Core-Gaming
-deliberately overrides four of its choices:
+deliberately overrides six of its choices:
 
 | Setting | Core default | Core-Gaming |
 |---|---|---|
@@ -121,6 +128,8 @@ deliberately overrides four of its choices:
 | `SystemResponsiveness` | 0 | **10** (AtlasOS value) |
 | Fullscreen Optimizations | on | **off** |
 | HAGS | forced on | **toggleable** |
+| `useplatformtick` | `yes` (RunOnce) | **deleted** — it is slower than the invariant TSC |
+| Memory compression | on | **off** on machines with 16 GB or more |
 
 ### Defender and Windows Update are removed, not disabled
 
@@ -214,6 +223,55 @@ template ever falls back to High performance.
 
 The scheme is exported to `C:\Windows\Tiny11Gaming\Atlas-Power-Scheme.pow` so you can
 move it to another machine.
+
+---
+
+## Device latency and 1% lows
+
+Average FPS is set by the GPU and the CPU clock. **1% lows are set by waiting**: a frame
+that arrives late is usually a frame that was held up by something else finishing — a
+DPC, an interrupt shared with another device, a NIC that batched its packets, a storage
+link that had to wake up, a USB port that suspended the mouse.
+
+The Core builder works on `install.wim`, where none of that exists yet: there is no PnP
+tree, no adapter, no device instance. So this layer is applied at first boot by
+`gaming-firstboot.ps1`, gated by the `interrupt_latency` group.
+
+| Applied | Why it moves 1% lows |
+|---|---|
+| **MSI mode** (`MSISupported=1`) on display, network, USB and audio devices | A line-based interrupt shares an IRQ line with whatever the firmware put there, so one device's ISR delays another's. MSI is a memory write: no sharing, no line to release. |
+| **`DevicePriority=High`** on the GPU and NIC | When two ISRs are ready at once, the kernel services the high-priority one first. |
+| **NIC interrupt moderation off** | Moderation batches interrupts to save CPU. Batching means the last packet of a burst waits for the timer — directly a late frame in an online game. |
+| **RSS on** | Receive queues spread across cores instead of serialising on one. |
+| **EEE, flow control, RSC, LSO off** | Each one is a batching or sleep mechanism on the wire. All four trade latency for throughput or power. |
+| **USB/HID power management off** (`EnhancedPowerManagementEnabled`, `SelectiveSuspendEnabled`, `AllowIdleIrpInD3`, `DeviceIdleEnabled`) | A suspended port has to wake before it can report. That is not input lag on average — it is an occasional late frame. |
+| **Memory compression off** on 16 GB+ | The compression worker is a CPU spike that lands exactly when the game is streaming assets. Below 16 GB the RAM saving is worth more than the spike, so it stays on. |
+
+### What is deliberately not done
+
+Being explicit about the rejected tweaks is more useful than the list above.
+
+- **Interrupt affinity (`DevicePolicy`) is left at the machine default.** Pinning GPU
+  interrupts to specific cores is a per-machine experiment; the right answer depends on
+  the core topology, and a wrong default is worse than what Windows picks.
+- **`useplatformtick` is removed, not set.** Earlier revisions set
+  `bcdedit /set useplatformtick yes`. That forces the platform timer (HPET-class) as the
+  tick source, which makes every timer read more expensive than the invariant TSC — it
+  *raises* DPC cost. It is now deleted at first boot and no longer written by the Core
+  builder, so older images get corrected.
+- **`useplatformclock true` is not used.** Same class of myth, larger effect. The
+  invariant TSC is the correct clock on every CPU this profile targets.
+- **`disabledynamictick yes` is kept, but only under `disable_cpu_idle`.** It stops the
+  timer going tickless while idle. Mild consistency gain, real idle-power cost.
+- **No standby-list "cleaners".** Emptying the standby list on a timer throws away the
+  file cache and causes the stutter it claims to fix.
+- **No per-vendor GPU registry edits.** Power-management mode belongs in the driver
+  profile (NVIDIA Control Panel / AMD Software), where it is supported and reversible.
+
+MSI is the one setting here with a real (if small) hardware risk. It is written **only**
+where the driver has already published `MessageSignaledInterruptProperties` — that key
+means the driver claims MSI support. A device that rejects the flag keeps its line
+interrupt and still boots; nothing here can prevent boot.
 
 ---
 
@@ -348,6 +406,10 @@ Balanced.
 - The printing optional features
 - The removed Xbox AppX packages
 - The `bcdedit` mitigation flags (changeable with `bcdedit`, but not by this script)
+- The `interrupt_latency` device settings — MSI mode, interrupt priority and NIC
+  advanced properties are written per device on the live machine. They are harmless to
+  leave in place, and Device Manager / `Set-NetAdapterAdvancedProperty` is the supported
+  way to change them back
 
 ---
 
@@ -390,12 +452,17 @@ offline hives the builder loads (`HKLM\zSYSTEM`, `zSOFTWARE`, `zDEFAULT`, `zNTUS
 This matters more than the tweak list.
 
 - **Frame-time consistency improves more than average FPS.** The latency tweaks
-  (C-State 0, no core parking, mitigations off, MPO off) mostly show up in 1% lows and
-  input latency, not in a big average-FPS number.
+  (C-State 0, no core parking, mitigations off, MPO off, MSI mode) mostly show up in 1%
+  lows and input latency, not in a big average-FPS number.
 - **Disabling VBS/HVCI is the largest single lever**, typically quoted at 5–15% on
   affected titles. It is also the biggest security cost.
-- **Some tweaks are marginal or hardware-specific.** HPET / timer settings in
-  particular help some rigs and do nothing — or regress — on others.
+- **The device layer is worth more on some machines than others.** MSI mode and
+  interrupt moderation matter most when a machine has several devices on one IRQ line or
+  a NIC with aggressive moderation — both are common on consumer boards and both are
+  invisible in a benchmark average.
+- **Some tweaks are marginal or hardware-specific.** Timer settings in particular help
+  some rigs and do nothing — or regress — on others. That is why the profile now removes
+  `useplatformtick` instead of setting it.
 - **Benchmark your own machine.** No profile can tell you what your CPU/motherboard/
   GPU combination will do.
 
@@ -444,9 +511,10 @@ Order of operations during a build:
 At first boot, `Windows\Setup\Scripts\SetupComplete.cmd` runs
 `gaming-firstboot.ps1` **as SYSTEM, before the first logon**. That hook is used because
 the power scheme GUID is machine-specific, the BCD store is not part of `install.wim`,
-and network adapters do not exist until drivers enumerate. Per-user settings do not go
-there — they are written into the Default user hive offline so every new profile
-inherits them.
+network adapters do not exist until drivers enumerate, and the PnP tree (MSI-capable
+devices, USB instances) does not exist until the target machine boots. Per-user settings
+do not go there — they are written into the Default user hive offline so every new
+profile inherits them.
 
 Everything is best-effort: a missing service or an unavailable DISM feature logs a
 warning and continues. A half-applied gaming profile beats a failed 90-minute build.

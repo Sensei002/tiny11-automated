@@ -20,6 +20,7 @@
     "network_latency_tweaks": true,
     "disable_mpo": true,
     "latency_input_tweaks": true,
+    "interrupt_latency": true,
     "disable_fso": true,
     "disable_game_mode": true,
     "disable_printing": true
@@ -29,12 +30,13 @@
     "disable_cpu_idle": "Force CPU to C-State 0 (no idle) to remove C-State wake latency.",
     "disable_security_mitigations": "Turn off VBS, HVCI, Credential Guard, System Guard and Spectre/Meltdown mitigations.",
     "remove_xbox_gaming_stack": "Remove Xbox Live / Gaming Services stack and Xbox AppX packages.",
-    "strip_background_noise": "Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics.",
+    "strip_background_noise": "Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics, and turn off memory compression on machines with 16 GB or more.",
     "instant_windows": "Remove window/menu/hover animations and shell delays, and shorten the app-close timeouts so windows open and close as fast as the hardware allows.",
     "disable_fast_startup": "Disable hibernation and Fast Startup (Hiberboot).",
     "network_latency_tweaks": "Disable Nagle, QoS reserved bandwidth, Delivery Optimization P2P and WU auto-reboot.",
     "disable_mpo": "Disable Multi-Plane Overlay to remove flicker / micro-stutter on some GPUs.",
-    "latency_input_tweaks": "Disable mouse acceleration, accessibility hotkeys and USB/GPU latency contributors.",
+    "latency_input_tweaks": "Disable mouse acceleration, accessibility hotkeys, USB 3 link power management and other USB/GPU latency contributors.",
+    "interrupt_latency": "Per-device work that only exists on a live OS: MSI interrupts with high priority, NIC interrupt moderation off, RSS on, and USB/HID power management off.",
     "disable_fso": "Force true fullscreen exclusive instead of Fullscreen Optimizations.",
     "disable_game_mode": "Disable Windows Game Mode (AtlasOS default).",
     "disable_printing": "Disable print spooler services and remove the printing optional features."
@@ -303,8 +305,8 @@
       "path": "Software\\Microsoft\\DirectX\\UserGpuPreferences",
       "name": "DirectXUserGlobalSettings",
       "type": "REG_SZ",
-      "value": "SwapEffectUpgradeEnable=1;VRROptimizeEnable=0",
-      "note": "DXGI flip model / Optimizations for windowed games."
+      "value": "SwapEffectUpgradeEnable=1;VRROptimizeEnable=1",
+      "note": "DXGI flip model / Optimizations for windowed games, with VRR optimisation ON. VRROptimizeEnable was 0 in an earlier revision, which told DWM not to align presentation to the display's refresh window - the opposite of what a VRR panel wants for frame pacing."
     },
     {
       "group": "network_latency_tweaks",
@@ -957,6 +959,14 @@
         "name": "WaitToKillServiceTimeout",
         "type": "REG_SZ",
         "value": "5000"
+      },
+      {
+        "hive": "NTUSER",
+        "path": "Software\\Microsoft\\DirectX\\UserGpuPreferences",
+        "name": "DirectXUserGlobalSettings",
+        "type": "REG_SZ",
+        "value": "SwapEffectUpgradeEnable=0;VRROptimizeEnable=1",
+        "note": "Leaves VRR optimisation on (it is the Windows default) and turns the windowed-games swap-chain upgrade back off."
       }
     ],
     "serviceRestore": [
@@ -993,7 +1003,8 @@
       "Windows Defender / Security - fully removed from the image by -RemoveDefender. Reinstall Windows or use the Standard variant to get it back.",
       "Printing optional features - the printing payload is removed from the image. Re-adding requires servicing packages.",
       "Xbox AppX packages - reinstallable from the Microsoft Store, but the Store itself is also removed on Core.",
-      "Boot configuration (bcdedit) - hypervisorlaunchtype and mitigation flags are applied at first boot and must be changed with bcdedit."
+      "Boot configuration (bcdedit) - hypervisorlaunchtype and mitigation flags are applied at first boot and must be changed with bcdedit.",
+      "Device latency settings (interrupt_latency) - MSI mode, interrupt priority and NIC advanced properties are written per device on the live machine. They survive the revert script; use Device Manager / Set-NetAdapterAdvancedProperty to change them back. None of them can prevent boot: a device that rejects MSI simply keeps its line-based interrupt."
     ]
   }
 }

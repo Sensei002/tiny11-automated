@@ -162,8 +162,12 @@ Describe "Core builder exposes the Defender removal switch" {
     }
 
     It "gates both halves behind -RemoveDefender in the main execution" {
-        $script:Core | Should -Match '(?s)if\s*\(\$RemoveDefender\)\s*\{\s*Remove-DefenderPayload'
-        $script:Core | Should -Match '(?s)if\s*\(\$RemoveDefender\)\s*\{\s*Remove-DefenderRegistry'
+        # The gate widened when Core-Gaming landed: a -GamingProfile build always
+        # removes Defender, so the condition is now
+        # 'if ($RemoveDefender -or $GamingProfile)'. Accept any condition that
+        # starts with -RemoveDefender rather than pinning the old single-flag form.
+        $script:Core | Should -Match '(?s)if\s*\(\s*\$RemoveDefender\b[^)]*\)\s*\{\s*Remove-DefenderPayload'
+        $script:Core | Should -Match '(?s)if\s*\(\s*\$RemoveDefender\b[^)]*\)\s*\{\s*Remove-DefenderRegistry'
     }
 
     It "runs the payload half before the registry hives are loaded" {

@@ -169,7 +169,12 @@ on:
         required: false
         default: true
       latency_input_tweaks:
-        description: 'Gaming: Disable mouse acceleration and accessibility hotkeys; enable the DXGI flip model.'
+        description: 'Gaming: Disable mouse acceleration and accessibility hotkeys; enable the DXGI flip model; turn off USB 3 link power management.'
+        type: boolean
+        required: false
+        default: true
+      interrupt_latency:
+        description: 'Gaming: Per-device latency work at first boot - MSI interrupts with high priority for GPU/NIC, NIC interrupt moderation off + RSS on, USB/HID power management off. Targets 1% lows rather than average FPS.'
         type: boolean
         required: false
         default: true
@@ -602,6 +607,7 @@ jobs:
             network_latency_tweaks      = ("${{ github.event.inputs.network_latency_tweaks }}"      -eq 'true')
             disable_mpo                 = ("${{ github.event.inputs.disable_mpo }}"                 -eq 'true')
             latency_input_tweaks        = ("${{ github.event.inputs.latency_input_tweaks }}"        -eq 'true')
+            interrupt_latency           = ("${{ github.event.inputs.interrupt_latency }}"           -eq 'true')
             disable_fso                 = ("${{ github.event.inputs.disable_fso }}"                 -eq 'true')
             disable_game_mode           = ("${{ github.event.inputs.disable_game_mode }}"           -eq 'true')
             disable_printing            = ("${{ github.event.inputs.disable_printing }}"            -eq 'true')

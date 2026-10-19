@@ -288,11 +288,70 @@
       "hidden": true,
       "beyondAtlas": true,
       "note": "100 = no core parking."
+    },
+    {
+      "name": "Processor energy performance preference policy",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "36687f9e-e3a5-4dbf-b1dc-15eb381c6863",
+      "ac": 0,
+      "dc": 0,
+      "hidden": true,
+      "group": "disable_cpu_idle",
+      "beyondAtlas": true,
+      "note": "0 = maximum performance. This is the hint modern Intel (HWP) and AMD (CPPC) CPUs actually act on: at 100 they prefer efficiency and leave frequency on the table even when the workload is latency-bound. Only meaningful because core parking and idle states are already off."
+    },
+    {
+      "name": "Processor performance boost policy",
+      "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
+      "subgroupName": "Processor power management",
+      "setting": "45bcc044-d885-43e2-8605-ee0ec6e96b59",
+      "ac": 100,
+      "dc": 100,
+      "hidden": true,
+      "group": "disable_cpu_idle",
+      "beyondAtlas": true,
+      "note": "100 = allow the full boost clock instead of the OS trimming boost for efficiency."
+    },
+    {
+      "name": "AHCI Link Power Management - HIPM/DIPM",
+      "subgroup": "0012ee47-9041-4b5d-9b77-535fba8b1442",
+      "subgroupName": "Hard disk",
+      "setting": "0b2d69d7-a2a1-449c-9680-f91c70521c60",
+      "ac": 0,
+      "dc": 0,
+      "hidden": true,
+      "beyondAtlas": true,
+      "note": "0 = Active. Stops the storage controller entering a low-power link state, which otherwise costs a resume latency on the first asset read after an idle moment - a classic single-frame hitch."
+    },
+    {
+      "name": "AHCI Link Power Management - Adaptive",
+      "subgroup": "0012ee47-9041-4b5d-9b77-535fba8b1442",
+      "subgroupName": "Hard disk",
+      "setting": "dab60367-53fe-4fbc-825e-521d069d2456",
+      "ac": 0,
+      "dc": 0,
+      "hidden": true,
+      "beyondAtlas": true,
+      "note": "0 = do not let the controller ramp the link down adaptively either."
+    },
+    {
+      "name": "USB 3 Link Power Management",
+      "subgroup": "2a737441-1930-4402-8d77-b2bebba308a3",
+      "subgroupName": "USB settings",
+      "setting": "d4e98f31-5ffe-4ce1-be31-1b38b384c009",
+      "ac": 0,
+      "dc": 0,
+      "hidden": true,
+      "group": "latency_input_tweaks",
+      "beyondAtlas": true,
+      "note": "0 = off. Removes the U1/U2 transition on the xHCI link, which shows up as mouse polling jitter rather than as raw input lag."
     }
   ],
   "bcd": [
     {
       "args": "/set hypervisorlaunchtype off",
+      "group": "disable_security_mitigations",
       "note": "Required for the VBS/HVCI-off path; also removes Hyper-V scheduler overhead."
     },
     {
@@ -301,11 +360,13 @@
     },
     {
       "args": "/set disabledynamictick yes",
-      "note": "Keep the system timer running at a constant rate."
+      "group": "disable_cpu_idle",
+      "note": "Keep the system timer running at a constant rate instead of going tickless while idle. Mild consistency gain, real idle-power cost - hence the group."
     },
     {
-      "args": "/set useplatformtick yes",
-      "note": "Use the platform tick source."
+      "args": "/deletevalue useplatformtick",
+      "ignoreFailure": true,
+      "note": "REMOVED FROM THE PROFILE. Earlier revisions set 'useplatformtick yes', which forces the platform timer (HPET-class) as the tick source. That makes every timer read more expensive than the invariant TSC and can raise DPC cost, so it is deleted if an older image left it behind. 'not present' is the normal outcome."
     },
     {
       "args": "/set timeout 5",
