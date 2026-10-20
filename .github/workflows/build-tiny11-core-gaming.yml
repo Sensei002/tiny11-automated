@@ -292,6 +292,44 @@ jobs:
             (Resolve-Path "scripts\gaming-profile.ps1"), [ref]$null, [ref]$null)
           Write-Output "gaming-profile.ps1 parsed cleanly"
 
+      - name: Validate essentials profile
+        shell: pwsh
+        run: |
+          # The essentials pass has no toggle, so there is no way to skip it at build
+          # time if the data is wrong. Validate with the real engine, which also runs
+          # the boot-critical service guard - that is the check that stops a bad edit
+          # from producing an unbootable image.
+          $essentialsPath = "config\essentials_profile.json"
+          if (-not (Test-Path $essentialsPath)) {
+            Write-Error "Essentials profile not found at $essentialsPath"
+            exit 1
+          }
+
+          . "scripts\essentials-profile.ps1"
+          Initialize-EssentialsModule -LogFile $null -ProfileDirectory "config"
+
+          try {
+            $essentials = Import-EssentialsProfile -Path $essentialsPath
+          } catch {
+            Write-Error "Essentials profile is invalid: $_"
+            exit 1
+          }
+
+          Write-Output "Essentials pass: $($essentials.profile) (schema $($essentials.schemaVersion))"
+          Write-Output "Registry entries: $(@($essentials.registry).Count)"
+          Write-Output "Key deletions:    $(@($essentials.deleteKeys).Count)"
+          Write-Output "Services:         $(@($essentials.services).Count)"
+          Write-Output "  manual (3):     $(@($essentials.services | Where-Object { $_.start -eq 3 }).Count)"
+          Write-Output "  disabled (4):   $(@($essentials.services | Where-Object { $_.start -eq 4 }).Count)"
+
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts\essentials-profile.ps1"), [ref]$null, [ref]$null)
+          Write-Output "essentials-profile.ps1 parsed cleanly"
+
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts\Tiny11-Report.ps1"), [ref]$null, [ref]$null)
+          Write-Output "Tiny11-Report.ps1 parsed cleanly"
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:

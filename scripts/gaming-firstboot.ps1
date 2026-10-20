@@ -15,6 +15,10 @@
     Per-user settings (mouse, FSO, GPU preference) are NOT here - they are written into
     the Default user hive by the builder, so every new profile inherits them.
 
+    This script also runs the first-boot half of the essentials pass (hibernation off,
+    temp cleanup, baseline restore point, process count). That stage is unconditional:
+    the essentials layer has no group flag, unlike every gaming group below.
+
     Safe to re-run manually: pass -Force to ignore the completion marker.
 
 .PARAMETER GamingDir
@@ -444,6 +448,96 @@ function Set-GamingMemoryCompression {
     }
 }
 
+#---------[ Essentials pass ]---------#
+
+function Invoke-EssentialsFirstBoot {
+    <#
+        The half of the essentials layer that needs a live OS. Everything here was
+        defined in config/essentials_profile.json and staged next to this script by the
+        builder.
+
+        Deliberately NOT group-gated. The essentials pass is part of what a Core-Gaming
+        build is, so - unlike every gaming group - it cannot be switched off with
+        gaming_groups.json.
+    #>
+    param([string]$ConfigPath)
+
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        Write-Log "Essentials config not found at $ConfigPath - skipping the first-boot half" 'WARN'
+        return
+    }
+
+    $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    $fb = $cfg.firstBoot
+    if (-not $fb) {
+        Write-Log "essentials_profile.json has no firstBoot block - skipping" 'WARN'
+        return
+    }
+
+    # 1. Hibernation. The registry half is already baked into the image; this is the
+    #    half that deletes hiberfil.sys and actually reclaims the disk space.
+    if ($fb.hibernateOff) {
+        & powercfg -hibernate off 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "  hibernation off - hiberfil.sys removed"
+        } else {
+            Write-Log "  powercfg -hibernate off failed (exit $LASTEXITCODE)" 'WARN'
+            $script:Failures++
+        }
+    }
+
+    # 2. Temp cleanup. install.wim ships an empty %TEMP%, but the setup process fills it
+    #    while the image is being laid down, so this runs after that.
+    if ($fb.cleanTemp) {
+        $targets = @(
+            (Join-Path $env:WINDIR 'Temp'),
+            $env:TEMP
+        ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+        $removed = 0
+        foreach ($dir in $targets) {
+            Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                try {
+                    Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+                    $removed++
+                } catch { }
+            }
+        }
+        Write-Log "  temp cleanup: removed $removed item(s) from $($targets.Count) location(s)"
+    }
+
+    # 3. Baseline restore point. Best-effort by design: System Restore is frequently
+    #    disabled by policy on a trimmed image, and a failure here must never fail the
+    #    boot. The point of it is to have one known-good state before the first driver
+    #    install.
+    if ($fb.restorePoint) {
+        $description = $fb.restorePointDescription
+        if (-not $description) { $description = 'Tiny11 Core-Gaming baseline' }
+        try {
+            $systemDrive = "$env:SystemDrive\"
+            Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
+            Checkpoint-Computer -Description $description -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop
+            Write-Log "  restore point created: '$description'"
+        } catch {
+            Write-Log "  restore point not created ($_)" 'WARN'
+        }
+    }
+
+    # 4. Process count. Recorded for the build log so the claim can be checked against
+    #    something. Note this is the SetupComplete session, not an interactive desktop -
+    #    expect it to read lower than Task Manager after logon.
+    if ($fb.reportProcessCount) {
+        try {
+            $count = @(Get-Process).Count
+            Write-Log "  processes in this session: $count (informational - SetupComplete, not an interactive desktop)"
+        } catch {
+            Write-Log "  could not count processes ($_)" 'WARN'
+        }
+    }
+
+    Write-Log "Essentials first-boot half complete"
+}
+
 #---------[ Main ]---------#
 
 Write-Log "=============================================="
@@ -462,6 +556,7 @@ if ((Test-Path -LiteralPath $script:Marker) -and -not $Force) {
 
 $powerConfig = Join-Path $GamingDir 'gaming_power_settings.json'
 $groupsFile = Join-Path $GamingDir 'gaming_groups.json'
+$essentialsConfig = Join-Path $GamingDir 'essentials_profile.json'
 
 $groups = @{}
 if (Test-Path -LiteralPath $groupsFile) {
@@ -485,6 +580,12 @@ function Test-GroupEnabled {
 }
 
 try {
+    # Essentials first. It is unconditional, and running it before the power scheme
+    # means the scheme is created and activated last - 'powercfg -hibernate off' can
+    # reset the active scheme, so anything that touches power must come before it.
+    Write-Section 'Essentials pass'
+    Invoke-EssentialsFirstBoot -ConfigPath $essentialsConfig
+
     if (Test-GroupEnabled 'atlas_power_scheme') {
         Write-Section 'Power scheme'
         $schemeGuid = New-GamingPowerScheme -ConfigPath $powerConfig -Groups $groups

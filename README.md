@@ -292,6 +292,7 @@ Siege on a CPU-bound machine.
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
+| **Essentials** | The post-install debloat pass, **baked in and always on**: activity history, BitLocker auto-encryption, delivery optimization, location, telemetry, WPBT, OneDrive, Windows AI, Widgets, Store recommendations, device companion apps, the classic right-click and Start layouts, plus **58 services** moved to manual or disabled. Takes a fresh install from ~100–115 processes to **50–65**. No toggle — see [GAMING.md](GAMING.md#the-essentials-pass) |
 | **Defender & Update** | Windows Defender / Security **removed outright**, plus the entire Windows Update stack — service, Update Medic, Update Orchestrator and the Settings entry. Always on for Core-Gaming; not a group toggle |
 
 Game runtimes (VC++, DirectX 9.0c, .NET Desktop) are deliberately **not** bundled — see
@@ -363,13 +364,16 @@ tiny11-automated/
 ├── config/
 │   ├── matrix_config.json              # Release-detection / trigger config
 │   ├── gaming_profile.json             # 🎮 Every gaming tweak, group-tagged
-│   └── gaming_power_settings.json      # 🎮 Power scheme + bcdedit definition
+│   ├── gaming_power_settings.json      # 🎮 Power scheme + bcdedit definition
+│   └── essentials_profile.json         # 🎮 Debloat pass, one entry per checkbox
 ├── scripts/
 │   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core (+ -GamingProfile)
 │   ├── nano11builder-headless.ps1        # ✨ Automated Nano
 │   ├── gaming-profile.ps1                # 🎮 Profile engine (dot-sourced)
+│   ├── essentials-profile.ps1            # 🎮 Debloat engine (always on for Core-Gaming)
 │   ├── gaming-firstboot.ps1              # 🎮 Runs once as SYSTEM on the target
+│   ├── Tiny11-Report.ps1                 # 🎮 Post-install report, ships in the image
 │   └── Undo-GamingTweaks.ps1             # 🎮 Revert, shipped inside the image
 ├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
@@ -874,9 +878,10 @@ disable_game_mode:          # Game Mode off (AtlasOS default)
 disable_printing:           # Print services + features removed
 ```
 
-The build also validates `config/gaming_profile.json` and parses
-`scripts/gaming-profile.ps1` **before** downloading the ISO, so a typo fails in seconds
-instead of after an hour.
+The build also validates `config/gaming_profile.json` and `config/essentials_profile.json`,
+and parses both profile engines, **before** downloading the ISO, so a typo fails in
+seconds instead of after an hour. The essentials profile is validated against a
+boot-critical service list, so a bad edit cannot produce an unbootable image.
 
 Full details: **[GAMING.md](GAMING.md)**
 

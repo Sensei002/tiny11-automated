@@ -1,0 +1,689 @@
+{
+  "profile": "tiny11-essentials",
+  "schemaVersion": 1,
+  "description": "The post-install debloat pass, baked into the image. Every entry names the checkbox it implements so the file can be audited against the source list item by item. Applied only on a Core-Gaming build, and always on - there is no group toggle.",
+  "source": "Essential Tweaks + Advanced Tweaks, checked items only (17 + 3). The Customize Preferences column is cosmetic and is deliberately not implemented here.",
+  "hivePrefixes": {
+    "SYSTEM": "HKLM\\zSYSTEM",
+    "SOFTWARE": "HKLM\\zSOFTWARE",
+    "DEFAULT": "HKLM\\zDEFAULT",
+    "NTUSER": "HKLM\\zNTUSER"
+  },
+  "registry": [
+    {
+      "item": "Activity History - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\System",
+      "name": "EnableActivityFeed",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Stops the timeline from recording app/ document usage."
+    },
+    {
+      "item": "Activity History - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\System",
+      "name": "PublishUserActivities",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Activity History - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\System",
+      "name": "UploadUserActivities",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "BitLocker - Disable",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\BitLocker",
+      "name": "PreventDeviceEncryption",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Blocks the automatic device encryption that 24H2 turns on by itself on modern hardware. The service is disabled separately, in services."
+    },
+    {
+      "item": "Delivery Optimization - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DeliveryOptimization",
+      "name": "DODownloadMode",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "0 = HTTP only, no peer-to-peer. No background uploader process."
+    },
+    {
+      "item": "Delivery Optimization - Disable",
+      "hive": "SOFTWARE",
+      "path": "Microsoft\\Windows\\CurrentVersion\\DeliveryOptimization\\Config",
+      "name": "DODownloadMode",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "End Task With Right Click - Enable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "TaskbarEndTask",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Adds 'End task' to the taskbar context menu (23H2+)."
+    },
+    {
+      "item": "File Explorer Automatic Folder Discovery - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\Bags\\AllFolders\\Shell",
+      "name": "FolderType",
+      "type": "REG_SZ",
+      "value": "NotSpecified",
+      "note": "Stops Explorer re-guessing a folder's type and applying Pictures/Music view templates."
+    },
+    {
+      "item": "Hibernation - Disable",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Power",
+      "name": "HibernateEnabled",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "The registry half. 'powercfg -h off' at first boot deletes hiberfil.sys and is the half that actually reclaims the disk space."
+    },
+    {
+      "item": "Hibernation - Disable",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Power",
+      "name": "HibernateEnabledDefault",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Location Tracking - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\LocationAndSensors",
+      "name": "DisableLocation",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "item": "Location Tracking - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\LocationAndSensors",
+      "name": "DisableLocationScripting",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "item": "Location Tracking - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\LocationAndSensors",
+      "name": "DisableWindowsLocationProvider",
+      "type": "REG_DWORD",
+      "value": "1"
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SystemPaneSuggestionsEnabled",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Store app suggestions in search and the Start menu."
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SilentInstalledAppsEnabled",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Stops Windows quietly installing 'suggested' Store apps after logon."
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "PreInstalledAppsEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "OemPreInstalledAppsEnabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-338388Enabled",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Start menu suggestions."
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-338389Enabled",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Tips and 'Get more out of Windows'."
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-338393Enabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-353694Enabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+      "name": "SubscribedContent-353696Enabled",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Prevent Device Companion Apps",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\Appx",
+      "name": "PreventDeviceCompanionAppInstall",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Stops the Store auto-installing a vendor companion app the moment a peripheral is plugged in."
+    },
+    {
+      "item": "Start Menu Previous Layout - Enable",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "Start_Layout",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "All-apps-first layout with no recommendation feed."
+    },
+    {
+      "item": "Telemetry - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DataCollection",
+      "name": "DoNotShowFeedbackNotifications",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "AllowTelemetry itself is already set by the Core registry pass; these are the values Core does not cover."
+    },
+    {
+      "item": "Telemetry - Disable",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\DataCollection",
+      "name": "AllowDeviceNameInTelemetry",
+      "type": "REG_DWORD",
+      "value": "0"
+    },
+    {
+      "item": "Widgets - Remove",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Dsh",
+      "name": "AllowNewsAndInterests",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "The widgets board. The WebExperience package that hosts it is already removed by the Core bloatware pass."
+    },
+    {
+      "item": "Widgets - Remove",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",
+      "name": "TaskbarDa",
+      "type": "REG_DWORD",
+      "value": "0",
+      "note": "Removes the widgets button from the taskbar."
+    },
+    {
+      "item": "Windows Platform Binary Table (WPBT) - Disable",
+      "hive": "SYSTEM",
+      "path": "ControlSet001\\Control\\Session Manager",
+      "name": "DisableWpbtExecution",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "WPBT lets firmware drop an executable into Windows at every boot. Nothing a gaming box needs."
+    },
+    {
+      "item": "Microsoft OneDrive - Remove",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\OneDrive",
+      "name": "DisableFileSyncNGSC",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Blocks OneDrive sync. The OneDriveSetup binaries are already deleted by the Core build."
+    },
+    {
+      "item": "Right-Click Menu Previous Layout - Enable",
+      "hive": "NTUSER",
+      "path": "Software\\Classes\\CLSID\\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\\InprocServer32",
+      "name": "",
+      "type": "REG_SZ",
+      "value": "",
+      "note": "Empty default value = the shell falls back to the Windows 10 context menu. Removing this key restores the Windows 11 one."
+    },
+    {
+      "item": "Windows AI - Disable And Remove",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\WindowsAI",
+      "name": "DisableAIDataAnalysis",
+      "type": "REG_DWORD",
+      "value": "1",
+      "note": "Recall / Click to Do analysis. The AI and Copilot packages are already in the Core bloatware removal list."
+    },
+    {
+      "item": "Windows AI - Disable And Remove",
+      "hive": "SOFTWARE",
+      "path": "Policies\\Microsoft\\Windows\\WindowsAI",
+      "name": "AllowRecallEnablement",
+      "type": "REG_DWORD",
+      "value": "0"
+    }
+  ],
+  "deleteKeys": [
+    {
+      "item": "Microsoft OneDrive - Remove",
+      "hive": "NTUSER",
+      "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Desktop\\NameSpace\\{018D5C66-4533-4307-9B53-224DE2ED1FE6}",
+      "note": "The OneDrive entry in the Explorer navigation pane. A key, not a value, so it cannot be expressed as a registry entry."
+    }
+  ],
+  "services": [
+    {
+      "item": "BitLocker - Disable",
+      "name": "BDESVC",
+      "start": 4,
+      "note": "BitLocker Drive Encryption Service."
+    },
+    {
+      "item": "Location Tracking - Disable",
+      "name": "lfsvc",
+      "start": 4,
+      "note": "Geolocation Service."
+    },
+    {
+      "item": "Microsoft Store Recommended Search Results - Disable",
+      "name": "InstallService",
+      "start": 3,
+      "note": "Microsoft Store Install Service - demand-start only."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "AJRouter",
+      "start": 3,
+      "note": "AllJoyn Router Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "ALG",
+      "start": 3,
+      "note": "Application Layer Gateway."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "AppIDSvc",
+      "start": 3,
+      "note": "Application Identity."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "AppReadiness",
+      "start": 3,
+      "note": "App Readiness - only needed during OOBE and app deployment."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "AppXSvc",
+      "start": 3,
+      "note": "AppX Deployment Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "AssignedAccessManagerSvc",
+      "start": 3,
+      "note": "Assigned Access (kiosk mode)."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "AxInstSV",
+      "start": 3,
+      "note": "ActiveX Installer."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "camsvc",
+      "start": 3,
+      "note": "Capability Access Manager - privacy consent broker."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "CDPSvc",
+      "start": 3,
+      "note": "Connected Devices Platform. Manual, not disabled - Bluetooth pairing and nearby sharing use it on demand."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "ClipSVC",
+      "start": 3,
+      "note": "Client License Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "COMSysApp",
+      "start": 3,
+      "note": "COM+ System Application."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "DevQueryBroker",
+      "start": 3,
+      "note": "Device query broker."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "DusmSvc",
+      "start": 3,
+      "note": "Data Usage."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "fdPHost",
+      "start": 3,
+      "note": "Function Discovery Provider Host."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "FDResPub",
+      "start": 3,
+      "note": "Function Discovery Resource Publication."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "FrameServer",
+      "start": 3,
+      "note": "Windows Camera Frame Server."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "icssvc",
+      "start": 3,
+      "note": "Windows Mobile Hotspot."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "LicenseManager",
+      "start": 3,
+      "note": "Windows License Manager."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "lmhosts",
+      "start": 3,
+      "note": "TCP/IP NetBIOS Helper."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "MessagingService",
+      "start": 3,
+      "note": "SMS / MMS routing."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "NcbService",
+      "start": 3,
+      "note": "Network Connection Broker."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "NetSetupSvc",
+      "start": 3,
+      "note": "Network Setup Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "NgcSvc",
+      "start": 3,
+      "note": "Windows Hello - only runs if a PIN or biometric is enrolled."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "NgcCtnrSvc",
+      "start": 3,
+      "note": "Windows Hello container."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "PhoneSvc",
+      "start": 3,
+      "note": "Telephony."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "QWAVE",
+      "start": 3,
+      "note": "Quality Windows Audio Video Experience."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "RmSvc",
+      "start": 3,
+      "note": "Radio Management - only needed when a radio is toggled."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "seclogon",
+      "start": 3,
+      "note": "Secondary Logon - 'Run as different user'."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "SensrSvc",
+      "start": 3,
+      "note": "Sensor Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "sppsvc",
+      "start": 3,
+      "note": "Software Protection - activation is already permanent, this only gates revalidation."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "SstpSvc",
+      "start": 3,
+      "note": "Secure Socket Tunneling Protocol."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "TabletInputService",
+      "start": 3,
+      "note": "Touch Keyboard and Handwriting Panel."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "TapiSrv",
+      "start": 3,
+      "note": "Telephony API."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "TokenBroker",
+      "start": 3,
+      "note": "Token Broker - only needed during an account sign-in."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "VSS",
+      "start": 3,
+      "note": "Volume Shadow Copy. Manual is correct - System Restore starts it on demand."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WdiServiceHost",
+      "start": 3,
+      "note": "Diagnostic Service Host."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WdiSystemHost",
+      "start": 3,
+      "note": "Diagnostic System Host."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WpnService",
+      "start": 3,
+      "note": "Windows Push Notification System Service. Manual keeps toasts working without a resident process."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WpnUserService",
+      "start": 3,
+      "note": "Per-user push notification service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WMPNetworkSvc",
+      "start": 4,
+      "note": "WMP Network Sharing - Windows Media Player is removed by the Core build."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "RemoteRegistry",
+      "start": 4,
+      "note": "Remote Registry."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WpcMonSvc",
+      "start": 4,
+      "note": "Parental Controls."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "SEMgrSvc",
+      "start": 4,
+      "note": "Payments and NFC/SE Manager."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "SDRSVC",
+      "start": 4,
+      "note": "Windows Backup."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "wisvc",
+      "start": 4,
+      "note": "Windows Insider Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "SharedAccess",
+      "start": 4,
+      "note": "Internet Connection Sharing."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "SNMPTRAP",
+      "start": 4,
+      "note": "SNMP Trap."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "RetailDemo",
+      "start": 4,
+      "note": "Retail Demo Service."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "OneSyncSvc",
+      "start": 4,
+      "note": "Per-user Sync Host. Mail, Calendar and People are removed, so nothing is left to sync."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "CDPUserSvc",
+      "start": 4,
+      "note": "Per-user Connected Devices Platform. Phone Link and Nearby Sharing are gone."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "UnistoreSvc",
+      "start": 4,
+      "note": "Per-user User Data Storage - backs Mail/Calendar/People."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "UserDataSvc",
+      "start": 4,
+      "note": "Per-user User Data Access - same apps."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "PimIndexMaintenanceSvc",
+      "start": 4,
+      "note": "Per-user contact indexer."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "ContactData",
+      "start": 4,
+      "note": "Per-user contact data."
+    },
+    {
+      "item": "Services - Set to Manual",
+      "name": "WalletService",
+      "start": 4,
+      "note": "Wallet Service."
+    }
+  ],
+  "handledElsewhere": [
+    {
+      "item": "ConsumerFeatures - Disable",
+      "by": "core",
+      "where": "Apply-RegistryTweaks in tiny11coremaker-headless.ps1",
+      "evidence": "SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent\\DisableWindowsConsumerFeatures = 1, plus DisableConsumerAccountStateContent and DisableCloudOptimizedContent",
+      "note": "Core sets this unconditionally for every image, so repeating it here would be two sources of truth that can drift."
+    },
+    {
+      "item": "Temporary Files - Remove",
+      "by": "firstBoot",
+      "where": "firstBoot.cleanTemp in gaming-firstboot.ps1",
+      "evidence": "clears %WINDIR%\\Temp and %TEMP% once, as SYSTEM, before the first logon",
+      "note": "There is no populated %TEMP% inside install.wim - setup fills it while laying the image down, so this can only run on the target machine."
+    },
+    {
+      "item": "Restore Point - Create",
+      "by": "firstBoot",
+      "where": "firstBoot.restorePoint in gaming-firstboot.ps1",
+      "evidence": "Enable-ComputerRestore + Checkpoint-Computer, best-effort",
+      "note": "Needs a running VSS and a real system volume."
+    }
+  ],
+  "firstBoot": {
+    "hibernateOff": true,
+    "cleanTemp": true,
+    "restorePoint": true,
+    "restorePointDescription": "Tiny11 Core-Gaming baseline",
+    "reportProcessCount": true
+  },
+  "notes": [
+    "Every entry is applied unconditionally. There is no group flag and no workflow input for this layer - a Core-Gaming build always gets it.",
+    "Core already covers ConsumerFeatures, Telemetry AllowTelemetry, background apps, visual effects, OneDrive Setup removal, Widgets/Copilot/AI packages and the WSearch/DiagTrack services. Those are not duplicated here; GAMING.md lists them as already-covered."
+  ]
+}

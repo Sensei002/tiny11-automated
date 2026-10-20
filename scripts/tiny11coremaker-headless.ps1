@@ -60,6 +60,14 @@
     turned off with -GamingGroups - build a plain Core image if you want either
     kept.
 
+    A Core-Gaming build also ALWAYS applies the essentials pass defined in
+    config/essentials_profile.json - the post-install debloat list (activity
+    history, BitLocker auto-encryption, delivery optimization, location, telemetry,
+    WPBT, OneDrive, Windows AI, the right-click/Start menu layouts, and a long list
+    of services moved to manual or disabled). Like the Defender and Windows Update
+    removals it has no group flag and no workflow input: it is part of what
+    Core-Gaming means. See the Essentials section of GAMING.md.
+
 .PARAMETER GamingProfileFile
     Path to the gaming profile JSON (optional). Defaults to
     config/gaming_profile.json in the repository root.
@@ -167,6 +175,7 @@ $logFile = "$PSScriptRoot\tiny11-core_$(Get-Date -Format yyyyMMdd_HHmmss).log"
 # only when -GamingProfile is set, so a plain Core build is completely unaffected.
 $gamingProfileData = $null
 $gamingGroupFlags = $null
+$essentialsProfileData = $null
 $gamingConfigDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'config'
 
 if ($GamingProfile) {
@@ -175,6 +184,15 @@ if ($GamingProfile) {
         throw "Gaming profile requested but the engine was not found at $gamingModule"
     }
     . $gamingModule
+
+    # The essentials layer is Core-Gaming only and is not toggleable: no group flag, no
+    # workflow input. It reproduces the post-install debloat pass that would otherwise be
+    # run by hand on every fresh install.
+    $essentialsModule = Join-Path $PSScriptRoot 'essentials-profile.ps1'
+    if (-not (Test-Path -LiteralPath $essentialsModule)) {
+        throw "Gaming profile requested but the essentials engine was not found at $essentialsModule"
+    }
+    . $essentialsModule
 }
 
 # Initialize admin identifiers for permission operations
@@ -1851,6 +1869,15 @@ try {
         } else {
             Write-Log "Gaming groups OFF: (none)"
         }
+
+        # Essentials pass. The workflow validates this file before it downloads the
+        # ISO; the builder re-validates because it is the authority and may be run
+        # directly. Either way a bad edit fails here, not 40 minutes into DISM.
+        # There is no toggle: this always runs on a Core-Gaming build.
+        Initialize-EssentialsModule -LogFile $logFile -ProfileDirectory $gamingConfigDir
+        $essentialsConfig = Join-Path $gamingConfigDir 'essentials_profile.json'
+        $essentialsProfileData = Import-EssentialsProfile -Path $essentialsConfig
+        Write-Log "Essentials pass: ENABLED (always on for Core-Gaming, $(@($essentialsProfileData.registry).Count) registry value(s), $(@($essentialsProfileData.services).Count) service(s))"
     }
 
     Test-Prerequisites
@@ -1927,6 +1954,13 @@ try {
         Remove-DefenderRegistry
     }
 
+    # Essentials pass, registry half. Deliberately placed between the Core registry
+    # pass and the performance/gaming passes: performance settings outrank privacy and
+    # cosmetic defaults, so anything that ever collides is resolved in that direction.
+    if ($GamingProfile -and $essentialsProfileData) {
+        Invoke-EssentialsRegistryTweaks -Profile $essentialsProfileData
+    }
+
     # Gaming profile: complete Windows Update removal. Registry half. Runs after
     # Apply-RegistryTweaks so it wins over the always-on Core WU policies.
     if ($GamingProfile) {
@@ -1945,6 +1979,10 @@ try {
     Remove-ScheduledTasks
     Remove-NonEssentialServices
 
+    if ($GamingProfile -and $essentialsProfileData) {
+        Invoke-EssentialsServiceTweaks -Profile $essentialsProfileData
+    }
+
     if ($GamingProfile) {
         Invoke-GamingServiceTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
     }
@@ -1960,6 +1998,25 @@ try {
     if ($GamingProfile) {
         New-GamingFirstBootPayload -Profile $gamingProfileData -Groups $gamingGroupFlags `
             -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -HagsMode $HagsMode
+
+        # Essentials: stage its data next to the gaming payload, write the audit
+        # manifest, and add the report script. gaming-firstboot.ps1 picks the JSON up
+        # from the same directory and runs the first-boot half of the layer.
+        if ($essentialsProfileData) {
+            $gamingPayloadDir = Join-Path $scratchDir 'Windows\Tiny11Gaming'
+            Copy-Item -LiteralPath (Join-Path $gamingConfigDir 'essentials_profile.json') `
+                -Destination (Join-Path $gamingPayloadDir 'essentials_profile.json') -Force
+            New-EssentialsManifest -Profile $essentialsProfileData `
+                -Destination (Join-Path $gamingPayloadDir 'ESSENTIALS_PROFILE.md')
+
+            $reportSource = Join-Path $PSScriptRoot 'Tiny11-Report.ps1'
+            if (Test-Path -LiteralPath $reportSource) {
+                Copy-Item -LiteralPath $reportSource -Destination (Join-Path $gamingPayloadDir 'Tiny11-Report.ps1') -Force
+            } else {
+                Write-Log "Report script missing at $reportSource" "WARN"
+            }
+            Write-Log "Essentials payload staged into Windows\Tiny11Gaming"
+        }
     }
 
     # Finalization phase

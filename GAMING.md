@@ -15,6 +15,7 @@ Rainbow Six Siege on a CPU-bound machine.
 
 - [Building it](#building-it)
 - [What gets applied](#what-get-applied)
+- [The essentials pass](#the-essentials-pass)
 - [The power scheme](#the-power-scheme)
 - [Device latency and 1% lows](#device-latency-and-1-lows)
 - [Instant window response](#instant-window-response)
@@ -164,6 +165,144 @@ the `SettingsPageVisibility` policy (`hide:windowsupdate;windowsdefender`).
 `wuaueng.dll` and `wuapi.dll` are deliberately **left in place** — other inbox components
 link them, and a missing DLL fails hard rather than degrading. With the services gone,
 Windows Update cannot run regardless.
+
+---
+
+## The essentials pass
+
+The gaming groups above are about latency. This layer is about the other thing people
+do to a fresh install: the debloat pass. It reproduces the "Essential Tweaks" and
+"Advanced Tweaks" list that would otherwise be clicked through by hand after every
+install, and bakes the result into the image.
+
+**It has no toggle.** There is no group flag, no `-GamingGroups` key and no workflow
+input — a Core-Gaming build always applies it, the same way it always removes Defender
+and the Windows Update stack. That is deliberate: the workflow is at GitHub's 25-input
+cap, and this is meant to be part of what Core-Gaming *is*, not an option.
+
+Everything lives in [`config/essentials_profile.json`](config/essentials_profile.json).
+Every entry carries the name of the checkbox it implements, so the file can be diffed
+against the source list item by item.
+
+### What it applies
+
+| Source item | Implementation |
+|---|---|
+| Activity History — Disable | `EnableActivityFeed`, `PublishUserActivities`, `UploadUserActivities` = 0 |
+| BitLocker — Disable | `PreventDeviceEncryption` = 1 (stops 24H2 auto-encrypting on its own) + `BDESVC` disabled |
+| Delivery Optimization — Disable | `DODownloadMode` = 0 (policy + config) + `DoSvc` disabled |
+| End Task With Right Click — Enable | `TaskbarEndTask` = 1 |
+| File Explorer Automatic Folder Discovery — Disable | `FolderType` = `NotSpecified` |
+| Hibernation — Disable | `HibernateEnabled` = 0, plus `powercfg -hibernate off` at first boot |
+| Location Tracking — Disable | `DisableLocation` / `DisableLocationScripting` / `DisableWindowsLocationProvider` + `lfsvc` disabled |
+| Microsoft Store Recommended Search Results — Disable | `SilentInstalledAppsEnabled`, `PreInstalledAppsEnabled`, `SystemPaneSuggestionsEnabled` and the `SubscribedContent-*` set = 0 |
+| Prevent Device Companion Apps | `PreventDeviceCompanionAppInstall` = 1 |
+| Services — Set to Manual | 58 services across the layer: 40 moved to Manual, 18 disabled (see below) |
+| Start Menu Previous Layout — Enable | `Start_Layout` = 1 |
+| Telemetry — Disable | `AllowTelemetry` (Core) + `DoNotShowFeedbackNotifications`, `AllowDeviceNameInTelemetry`, `DiagTrack` |
+| Widgets — Remove | `AllowNewsAndInterests` = 0, `TaskbarDa` = 0, WebExperience package (Core) |
+| Windows Platform Binary Table — Disable | `DisableWpbtExecution` = 1 |
+| Microsoft OneDrive — Remove | `DisableFileSyncNGSC` = 1, nav-pane `NameSpace` key deleted, `OneDriveSetup.exe` deleted (Core) |
+| Right-Click Menu Previous Layout — Enable | Empty default value on the `{86ca1aa0-…}` `InprocServer32` key |
+| Windows AI — Disable And Remove | `DisableAIDataAnalysis`, `AllowRecallEnablement` = 0, AI/Recall packages (Core) |
+
+That is **20 boxes: 17 Essential Tweaks and 3 Advanced Tweaks**, all ticked in the source
+list. **17 are implemented here** and **3 are handled elsewhere** — recorded in the
+`handledElsewhere` block of the JSON rather than in prose, so the file accounts for all
+20 and a test can assert the total:
+
+| Item | Handled by | Why not here |
+|---|---|---|
+| ConsumerFeatures — Disable | Core `Apply-RegistryTweaks` | `DisableWindowsConsumerFeatures=1` is already set for every image; repeating it would be two sources of truth |
+| Temporary Files — Remove | first boot | There is no populated `%TEMP%` inside `install.wim` |
+| Restore Point — Create | first boot | Needs a running VSS and a real system volume |
+
+`ESSENTIALS_PROFILE.md` in the image opens with a 20-row coverage table showing, for each
+box, which mechanism handles it and where.
+
+### Services: manual vs disabled
+
+The distinction matters, and it is the main reason the process count drops.
+
+- **Manual (40)** — demand-start. The service does not run at boot and no process
+  exists until something asks for it. This is safe for the long tail: `AJRouter`,
+  `ALG`, `AppReadiness`, `AppXSvc`, `camsvc`, `CDPSvc`, `ClipSVC`, `WdiServiceHost`,
+  `WpnService`, `TokenBroker`, `VSS` and friends. `CDPSvc` in particular stays
+  **Manual, not Disabled**, because Bluetooth pairing and nearby sharing start it on
+  demand.
+- **Disabled (18)** — nothing is left to demand it: `BDESVC`, `lfsvc`, `WMPNetworkSvc`,
+  `RemoteRegistry`, `WpcMonSvc`, `SEMgrSvc`, `SDRSVC`, `wisvc`, `SharedAccess`,
+  `SNMPTRAP`, `RetailDemo`, plus the per-user services behind the removed apps
+  (`OneSyncSvc`, `CDPUserSvc`, `UnistoreSvc`, `UserDataSvc`, `PimIndexMaintenanceSvc`,
+  `ContactData`, `WalletService`).
+
+The per-user services are the ones that matter for process count. Each of
+`UnistoreSvc`, `UserDataSvc`, `PimIndexMaintenanceSvc`, `ContactData`, `CDPUserSvc` and
+`OneSyncSvc` normally spawns its own `svchost` at logon. They back Mail, Calendar,
+People, Phone Link and clipboard sync — all removed by this build — so disabling them
+costs nothing here.
+
+### The safety guard
+
+`essentials-profile.ps1` refuses to touch a hardcoded list of boot-critical services
+(`RpcSs`, `DcomLaunch`, `LSM`, `Power`, `PlugPlay`, `EventLog`, `Schedule`, `Winmgmt`,
+`AudioSrv`, `BFE`, `mpssvc`, …). A profile edit that tries to disable one is **rejected
+at validation time** — before the ISO is downloaded — rather than producing an
+unbootable image. Services that do not exist in the image are skipped, never created.
+
+### Process count
+
+The whole point of the list is that a fresh install idles around **100–115** processes
+and this lands it at **50–65**. That number is not asserted, it is measurable:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Windows\Tiny11Gaming\Tiny11-Report.ps1
+```
+
+The report prints the process count, the service breakdown, every essentials registry
+value with an OK/MISS mark, and the startup entries. `-Detailed` adds the full process
+and service lists. The build log also records the count during the SetupComplete
+session, which reads lower than an interactive desktop — compare like with like.
+
+If you are still above ~70 after logon, the usual causes are a vendor utility
+(iCUE, Armoury Crate, Synapse) reinstalled itself, or a driver package that brought its
+own tray service.
+
+### First-boot half
+
+Four things cannot be done offline and run from `gaming-firstboot.ps1`, unconditionally,
+before the power scheme (because `powercfg -hibernate off` can reset the active scheme):
+
+| Action | Why not offline |
+|---|---|
+| `powercfg -hibernate off` | Deletes `hiberfil.sys`; the file only exists on an installed system |
+| Temp cleanup | `install.wim` ships an empty `%TEMP%`, but setup fills it while laying the image down |
+| Restore point | Needs a running VSS and a real system volume. Best-effort — it logs a warning and continues if System Restore is unavailable |
+| Process count | Only meaningful on the target machine |
+
+### Deliberately not implemented
+
+- **The Customize Preferences column.** Dark theme, taskbar alignment, scrollbars,
+  num lock, S3 sleep and the rest are cosmetic. The two settings from that column that
+  actually affect performance — Game Mode and mouse acceleration — are already handled
+  by the gaming profile, which stays the single source of truth for those.
+- **Disk Cleanup / WinSxS cleanup.** Not ticked in the source list, and `Optimize-WinSxS`
+  already handles the WinSxS side.
+- **Scheduled defrag/trim, Teredo, IPv6, Visual Effects, Xbox Game Bar, Edge removal.**
+  All present in the tool but not ticked, so not carried over. Several are already
+  covered by Core anyway (Edge and the Xbox stack are removed unconditionally).
+
+### Things that will feel different
+
+- **OneDrive is gone**, including the Explorer nav-pane entry. Files already in
+  `%USERPROFILE%\OneDrive` are untouched, but the client will not start.
+- **The Windows 10 right-click menu is back** (no "Show more options" step). Delete
+  `HKCU\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}` to restore the
+  Windows 11 menu.
+- **BitLocker is off and cannot be re-enabled without turning the service back on.**
+  On a machine that will hold real data, re-enable `BDESVC` first.
+- **A restore point exists but System Restore is not otherwise managed.** It is one
+  known-good baseline, not a backup strategy.
 
 ---
 
@@ -387,6 +526,8 @@ Two files are written into the image:
 |---|---|
 | `C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1` | Restores the reversible settings |
 | `C:\Windows\Tiny11Gaming\GAMING_PROFILE.md` | The exact list of what was changed in *your* build |
+| `C:\Windows\Tiny11Gaming\ESSENTIALS_PROFILE.md` | The essentials pass, item by item |
+| `C:\Windows\Tiny11Gaming\Tiny11-Report.ps1` | Read-only post-install report: process count, services, every essentials value |
 | `C:\Windows\Tiny11Gaming\gaming-firstboot.log` | What the first-boot payload actually did |
 
 ```powershell
@@ -410,6 +551,11 @@ Balanced.
   advanced properties are written per device on the live machine. They are harmless to
   leave in place, and Device Manager / `Set-NetAdapterAdvancedProperty` is the supported
   way to change them back
+- **The essentials pass is not touched by the undo script at all.** It is a separate
+  layer with its own data file, and undoing it would mean re-enabling telemetry and
+  reinstalling OneDrive — which is not what anyone running this build wants. The
+  individual keys are listed in `ESSENTIALS_PROFILE.md` if you need to reverse one by
+  hand
 
 ---
 
@@ -488,23 +634,29 @@ This matters more than the tweak list.
 ```
 scripts/
 ├── gaming-profile.ps1        # profile engine (dot-sourced by the builder)
+├── essentials-profile.ps1    # debloat engine (dot-sourced by the builder, always on)
 ├── gaming-firstboot.ps1      # runs once as SYSTEM on the target machine
+├── Tiny11-Report.ps1         # read-only post-install report
 └── Undo-GamingTweaks.ps1     # revert, shipped inside the image
 
 config/
 ├── gaming_profile.json       # every tweak, grouped
-└── gaming_power_settings.json# power scheme + bcdedit definition
+├── gaming_power_settings.json# power scheme + bcdedit definition
+└── essentials_profile.json   # the debloat pass, one entry per checkbox
 ```
 
 Order of operations during a build:
 
 1. **Image-level removals** — AppX packages, system packages and optional features,
    while the registry hives are still unloaded.
-2. **Registry tweaks** — after `Apply-PerformanceTweaks`, so Core-Gaming can override
+2. **Essentials registry** — between `Apply-RegistryTweaks` and
+   `Apply-PerformanceTweaks`, so performance and gaming settings always outrank privacy
+   and cosmetic ones if two ever collide.
+3. **Registry tweaks** — after `Apply-PerformanceTweaks`, so Core-Gaming can override
    the Core defaults. Hives are `HKLM\zSYSTEM`, `zSOFTWARE`, `zDEFAULT`, `zNTUSER`.
-3. **Service tweaks** — a service key that does not exist in the image is skipped
-   rather than created.
-4. **Payload injection** — before `Dismount-AndExport`, so files land inside
+4. **Service tweaks** — essentials first, then gaming. A service key that does not
+   exist in the image is skipped rather than created.
+5. **Payload injection** — before `Dismount-AndExport`, so files land inside
    `install.wim`. Only `install.wim` is touched; `boot.wim` is left alone because
    Ventoy inspects and patches it.
 
@@ -515,6 +667,9 @@ network adapters do not exist until drivers enumerate, and the PnP tree (MSI-cap
 devices, USB instances) does not exist until the target machine boots. Per-user settings
 do not go there — they are written into the Default user hive offline so every new
 profile inherits them.
+
+The essentials stage runs first inside that script, because `powercfg -hibernate off`
+can reset the active power scheme and the scheme must be created last.
 
 Everything is best-effort: a missing service or an unavailable DISM feature logs a
 warning and continues. A half-applied gaming profile beats a failed 90-minute build.
