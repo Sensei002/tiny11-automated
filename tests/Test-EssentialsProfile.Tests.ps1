@@ -246,6 +246,52 @@ Describe 'Essentials engine' {
         @($imported.registry).Count | Should -BeGreaterThan 0
     }
 
+    It 'imports cleanly under Set-StrictMode -Version Latest, as the builder calls it' {
+        # Regression for run 39375184068. tiny11coremaker-headless.ps1 runs under strict
+        # mode, where a member access on $null throws. Test-EssentialsProfile returns an
+        # empty array for a clean profile, the pipeline unrolls that empty array to
+        # $null, and $problems.Count then killed the build - while this suite and the
+        # workflow validation step, neither of which used strict mode, both passed.
+        #
+        # The engine is dot-sourced INSIDE the strict scope on purpose: strict mode is
+        # per-scope, so a function defined outside it would not inherit the setting and
+        # this test would silently prove nothing.
+        $imported = & {
+            Set-StrictMode -Version Latest
+            . $modulePath
+            Initialize-EssentialsModule -LogFile $null -ProfileDirectory $configDir
+            Import-EssentialsProfile -Path $profilePath
+        }
+        $imported.profile | Should -Be 'tiny11-essentials'
+        @($imported.registry).Count | Should -BeGreaterThan 0
+        @($imported.services).Count | Should -BeGreaterThan 0
+    }
+
+    It 'still rejects an invalid profile under strict mode' {
+        # The fix must not turn validation into a no-op: forcing an array around an
+        # empty result is only correct if real problems still abort the build.
+        $bad = Get-Content -LiteralPath $profilePath -Raw | ConvertFrom-Json
+        $bad.services = @([pscustomobject]@{ item = 'test'; name = 'RpcSs'; start = 4 })
+        $badPath = Join-Path ([IO.Path]::GetTempPath()) "essentials-bad-strict-$PID.json"
+        try {
+            $bad | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $badPath -Encoding utf8
+            $threw = $false
+            try {
+                & {
+                    Set-StrictMode -Version Latest
+                    . $modulePath
+                    Initialize-EssentialsModule -LogFile $null -ProfileDirectory $configDir
+                    Import-EssentialsProfile -Path $badPath
+                } | Out-Null
+            } catch {
+                $threw = $true
+            }
+            $threw | Should -BeTrue
+        } finally {
+            Remove-Item -LiteralPath $badPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'writes a manifest with a section per item' {
         $out = Join-Path ([IO.Path]::GetTempPath()) "essentials-manifest-test-$PID.md"
         try {
@@ -334,6 +380,23 @@ Describe 'Not toggleable' {
         if ($download -lt 0) { $download = $workflowRaw.IndexOf('Resolve Windows 11 ISO') }
         $validate | Should -BeGreaterThan 0
         if ($download -gt 0) { $validate | Should -BeLessThan $download }
+    }
+
+    It 'validates the profile under strict mode, the way the builder runs it' {
+        # Without this the validation step passes while the build fails, which is exactly
+        # how the $null.Count bug reached a real run: the step imported the profile in a
+        # non-strict scope and saw no problem at all. Strict mode is per-scope, so the
+        # import has to happen after Set-StrictMode inside the same scope to be useful.
+        $start = $workflowRaw.IndexOf('Validate essentials profile')
+        $start | Should -BeGreaterThan 0
+        $end = $workflowRaw.IndexOf('- name:', $start + 10)
+        if ($end -lt 0) { $end = $workflowRaw.Length }
+        $step = $workflowRaw.Substring($start, $end - $start)
+
+        $step | Should -Match 'Set-StrictMode\s+-Version\s+Latest'
+        $strictAt = $step.IndexOf('Set-StrictMode')
+        $importAt = $step.IndexOf('Import-EssentialsProfile')
+        $importAt | Should -BeGreaterThan $strictAt
     }
 
     It 'is not gated on a group in the first-boot script' {

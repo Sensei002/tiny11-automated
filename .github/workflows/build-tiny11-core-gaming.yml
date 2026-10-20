@@ -305,11 +305,20 @@ jobs:
             exit 1
           }
 
-          . "scripts\essentials-profile.ps1"
-          Initialize-EssentialsModule -LogFile $null -ProfileDirectory "config"
+          # Import inside a strict-mode scope, exactly the way tiny11coremaker-headless.ps1
+          # calls it. The builder runs under Set-StrictMode -Version Latest, and an empty
+          # validation result unrolls to $null - $null.Count only throws under strict mode.
+          # Without this the validation step passes while the build fails, which is what
+          # happened in run 39375184068.
+          $importEssentials = {
+            Set-StrictMode -Version Latest
+            . "scripts\essentials-profile.ps1"
+            Initialize-EssentialsModule -LogFile $null -ProfileDirectory "config"
+            Import-EssentialsProfile -Path $essentialsPath
+          }
 
           try {
-            $essentials = Import-EssentialsProfile -Path $essentialsPath
+            $essentials = & $importEssentials
           } catch {
             Write-Error "Essentials profile is invalid: $_"
             exit 1

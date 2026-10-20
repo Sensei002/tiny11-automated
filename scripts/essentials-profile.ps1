@@ -93,7 +93,13 @@ function Import-EssentialsProfile {
 
     $profile = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 
-    $problems = Test-EssentialsProfile -Profile $profile
+    # @() is load-bearing, not style. Test-EssentialsProfile returns an empty array when
+    # the profile is clean, and the pipeline unrolls an empty array to $null. Under
+    # Set-StrictMode -Version Latest - which tiny11coremaker-headless.ps1 sets - a member
+    # access on $null throws "The property 'Count' cannot be found on this object", so a
+    # valid profile would fail the build while an invalid one passed. Forcing an array
+    # here keeps a clean import clean in both strict and non-strict callers.
+    $problems = @(Test-EssentialsProfile -Profile $profile)
     if ($problems.Count -gt 0) {
         throw "Essentials profile $Path is invalid:`n  - $($problems -join "`n  - ")"
     }
