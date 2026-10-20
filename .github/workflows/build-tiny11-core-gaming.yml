@@ -95,10 +95,10 @@ on:
         required: false
         default: false
       preserve_winre:
-        description: 'Preserve winre.wim (required for real hardware / 24H2+ installs to avoid 0x8007000B)'
+        description: 'Keep winre.wim and the recovery environment. ON by default: removing it is the documented cause of installs dying at ~10-11% with 0x80070003 on real hardware. Turn OFF only to save ~500MB on a build you will not need recovery on.'
         type: boolean
         required: false
-        default: false
+        default: true
       remove_defender:
         description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender and the whole Windows Update stack.'
         type: boolean

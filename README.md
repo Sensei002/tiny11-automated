@@ -406,7 +406,7 @@ tiny11-automated/
 ```powershell
 .\tiny11coremaker-headless.ps1
     [-ENABLE_DOTNET35]         # Enable .NET Framework 3.5 support
-    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x8007000B)
+    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x80070003)
     [-RemoveDefender]          # Completely remove Windows Defender / Security (no Antimalware service)
 ```
 
@@ -454,7 +454,7 @@ account screen.
     -INDEX <int>               # Image index
     [-SCRATCH <string>]        # Optional: Scratch disk
     [-SkipCleanup]             # Optional: Keep temp files
-    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x8007000B)
+    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x80070003)
 ```
 
 ### Examples
@@ -466,7 +466,7 @@ account screen.
 # Professional Edition Core with .NET 3.5
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -ENABLE_DOTNET35
 
-# Core build targeting real hardware (preserves WinRE to avoid 0x8007000B on 24H2, 25H2 and 26H2)
+# Core build targeting real hardware (preserves WinRE to avoid 0x80070003 on 24H2, 25H2 and 26H2)
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -PreserveWinRE
 
 # Core build with Windows Defender / Security completely removed (no Antimalware service)
@@ -717,12 +717,36 @@ Also worth checking:
 | Ventoy **1.1.07 or newer** | Older releases have known virtual-drive bugs |
 | Data partition is **NTFS**, not exFAT | exFAT is a documented cause of this error |
 | The ISO is **not** on the 32 MB `VTOYEFI` partition | Ventoy only scans the first, large partition |
-| Core/Nano on real hardware: pass **`-PreserveWinRE`** | These variants delete `winre.wim` by default, which is documented to break real-hardware installs on 24H2+ |
+| Core/Nano on real hardware: pass **`-PreserveWinRE`** | Removing `winre.wim` is documented to break real-hardware installs on 24H2+. The workflow now defaults this **on** — see *Install dies at ~10%* below |
 
 The build now also refuses to emit an ISO whose `sources\` has no usable
 `install.wim`/`install.esd`, because that failure looks identical to this one. If a
 build stops with *"Refusing to build an ISO…"*, the image export step failed — attach
 the build log (`scripts/*.log`, kept by running the workflow with `skip_cleanup: true`).
+
+#### Install dies at ~10% with `0x80070003`
+
+Setup got past "Copying Windows files", reached roughly 10%, then failed. That is
+SetupHost trying to stage the recovery environment while it applies the image.
+
+Windows Setup reads `Windows\System32\Recovery\ReAgent.xml` **out of the install
+image** and stages SafeOS from whatever `ImageLocation` points at. Delete `winre.wim`
+but leave the stock `ReAgent.xml` naming it, and Setup chases a file that is not on
+the media. The ReAgent patch that used to exist ran against `boot.wim` *after*
+`install.wim` had already been committed, so it could never fix this.
+
+Three things changed:
+
+* `Remove-WinRE` now zeroes `ReAgent.xml` in the OS image at the moment it deletes
+  `winre.wim`, so the invariant is *"winre.wim present, or ReAgent.xml zeroed"* —
+  never a `ReAgent.xml` pointing at a file that is gone.
+* `preserve_winre` defaults to **on**, so the default build keeps a working recovery
+  environment.
+* Before `oscdimg` runs, the build mounts the finished image read-only and **refuses to
+  publish it** if `ReAgent.xml` still names a missing `winre.wim`.
+
+If you are holding an ISO built before this fix, rebuild it — the old one cannot be
+patched after the fact without re-exporting the image.
 
 
 ### 🪟 Local Account — Offline, Out of the Box
@@ -814,9 +838,9 @@ skip_cleanup:           # Same as Standard
 enable_dotnet35:        # 🆕 Enable .NET Framework 3.5
   type: boolean
   default: false
-preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
+preserve_winre:         # 🆕 Keep winre.wim and the recovery environment
   type: boolean
-  default: false
+  default: true         # ON: removing it makes real-hardware installs fail at ~10% with 0x80070003
 
 remove_defender:        # 🆕 Completely remove Windows Defender / Security
   type: boolean
@@ -846,9 +870,9 @@ language:               # Language name (English, etc.)
   default: "English"
   
 skip_cleanup:           # Same as above
-preserve_winre:         # 🆕 Preserve winre.wim (real hardware / 24H2+ builds)
+preserve_winre:         # 🆕 Keep winre.wim and the recovery environment
   type: boolean
-  default: false
+  default: true         # ON: removing it makes real-hardware installs fail at ~10% with 0x80070003
 ```
 
 #### 4. Build Tiny11 Core-Gaming 🎮
