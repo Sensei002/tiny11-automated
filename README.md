@@ -286,7 +286,8 @@ Siege on a CPU-bound machine.
 | **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle, plus the energy-performance preference and boost policy that HWP/CPPC CPUs actually act on, and no storage-link power saving |
 | **CPU** | Power throttling off, `SystemResponsiveness` = 10 (AtlasOS value) |
 | **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
-| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on with VRR optimisation on · USB 3 link power management off |
+| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on with VRR optimisation on · USB 3 link power management off · global 1 ms timer resolution requests restored |
+| **Capture** | The OS side of smooth recording: power throttling, PCIe link state and USB suspend already off, Game DVR off, MMCSS at max, global 1 ms timers allowed. What is left is OBS configuration — the **replay-buffer guide ships in the image** at `C:\Windows\Tiny11Gaming\OBS-SETTINGS.md`, including the pre-Turing NVENC caveat. See [GAMING.md](GAMING.md#capture-and-recording) |
 | **Device latency** | At first boot, on the live machine: **MSI interrupts** with high priority for GPU and NIC, NIC interrupt moderation off, RSS on, EEE / flow control / RSC / LSO off, USB and HID power management off. This is the layer that moves **1% lows** rather than average FPS — see [GAMING.md](GAMING.md#device-latency-and-1-lows) |
 | **Display** | Fullscreen Optimizations **off** (true fullscreen exclusive) |
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
@@ -378,6 +379,7 @@ tiny11-automated/
 ├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
 ├── GAMING.md                   # 🎮 Core-Gaming documentation
+├── OBS-SETTINGS.md             # 🎮 Capture / replay-buffer guide, ships in the image
 ├── CONTRIBUTING.md             # Contributor guidelines
 ├── CODE_OF_CONDUCT.md          # Community standards
 ├── SECURITY.md                 # Security policy

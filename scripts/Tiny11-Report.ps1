@@ -7,6 +7,10 @@
     process count, running services, startup entries, and the state of each item
     the essentials layer is supposed to have applied.
 
+    The Capture / OBS section prints the GPU-scheduling, MPO, FSO, power-throttling and
+    timer-resolution values that OBS-SETTINGS.md assumes, plus the GPU list and OBS's
+    own process priority when it is running.
+
     Ships inside the image at C:\Windows\Tiny11Gaming\Tiny11-Report.ps1. Nothing is
     changed by running it - it only reads.
 
@@ -140,6 +144,56 @@ foreach ($s in $svcChecks) {
     }
     Write-Host ("  {0,-22} {1,-24} {2} / {3}" -f $svc.Name, $s.Label, $svc.StartType, $svc.Status) -ForegroundColor $colour
 }
+
+#---------[ Capture / OBS state ]---------#
+Write-Head 'Capture / OBS'
+
+# These are the values OBS-SETTINGS.md assumes. Printing them turns "the build is
+# supposed to have done X" into something checkable on the machine in front of you.
+$captureChecks = @(
+    @{ Label = 'HAGS (2=on)';              Path = 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers'; Name = 'HwSchMode' },
+    @{ Label = 'MPO (5=off)';              Path = 'HKLM:\SOFTWARE\Microsoft\Windows\Dwm'; Name = 'OverlayTestMode' },
+    @{ Label = 'FSO (2=off)';              Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_FSEBehaviorMode' },
+    @{ Label = 'GameDVR enabled';          Path = 'HKCU:\System\GameConfigStore'; Name = 'GameDVR_Enabled' },
+    @{ Label = 'GameDVR policy';           Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR'; Name = 'AllowGameDVR' },
+    @{ Label = 'Power throttling off';     Path = 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\PowerThrottling'; Name = 'PowerThrottlingOff' },
+    @{ Label = 'Global 1ms timers';        Path = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\kernel'; Name = 'GlobalTimerResolutionRequests' },
+    @{ Label = 'DXGI / VRR settings';      Path = 'HKCU:\Software\Microsoft\DirectX\UserGpuPreferences'; Name = 'DirectXUserGlobalSettings' }
+)
+
+foreach ($c in $captureChecks) {
+    $actual = Get-State -Path $c.Path -Name $c.Name
+    $colour = if ("$actual" -eq '(not set)') { 'DarkGray' } else { 'Green' }
+    Write-Host ("  {0,-24} {1,-24} = {2}" -f $c.Label, $c.Name, $actual) -ForegroundColor $colour
+}
+
+Write-Host ''
+Write-Host '  GPU(s):' -ForegroundColor DarkGray
+$gpus = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notmatch 'Basic|Remote|Mirror' })
+if ($gpus.Count -eq 0) {
+    Write-Host '    (could not enumerate)' -ForegroundColor DarkGray
+}
+foreach ($g in $gpus) {
+    Write-Host ("    {0}  driver {1}" -f $g.Name, $g.DriverVersion) -ForegroundColor DarkGray
+}
+
+$obs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^obs' })
+if ($obs.Count -gt 0) {
+    foreach ($o in $obs) {
+        $colour = if ($o.PriorityClass -in @('AboveNormal', 'High')) { 'Green' } else { 'Yellow' }
+        Write-Host ("    OBS running: {0} (PID {1}) priority {2}" -f $o.ProcessName, $o.Id, $o.PriorityClass) -ForegroundColor $colour
+    }
+    Write-Host '    AboveNormal or High is what OBS-SETTINGS.md recommends.' -ForegroundColor DarkGray
+} else {
+    Write-Host '    OBS is not running.' -ForegroundColor DarkGray
+}
+
+Write-Host ''
+Write-Host '  Guidance: C:\Windows\Tiny11Gaming\OBS-SETTINGS.md' -ForegroundColor DarkGray
+Write-Host '  If clips still stutter, the frame cap is the first thing to change,' -ForegroundColor DarkGray
+Write-Host '  not another registry value.' -ForegroundColor DarkGray
+Write-Host ''
 
 #---------[ Startup entries ]---------#
 Write-Head 'Startup entries'

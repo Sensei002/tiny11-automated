@@ -705,3 +705,78 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
         $builder | Should -Not -Match ([regex]::Escape("'DoSvc'"))
     }
 }
+
+Describe 'Capture and recording' {
+
+    BeforeAll {
+        $obsGuidePath = Join-Path $repoRoot 'OBS-SETTINGS.md'
+        $reportPath = Join-Path $scriptsDir 'Tiny11-Report.ps1'
+        $engineRaw = Get-Content -LiteralPath $modulePath -Raw
+        $reportRaw = Get-Content -LiteralPath $reportPath -Raw
+    }
+
+    It 'allows global 1 ms timer resolution requests' {
+        # Windows 10 2004 turned 1 ms timer requests into a per-process privilege and
+        # stopped honouring them from background processes. A recorder that is not the
+        # foreground window then runs on the ~15.6 ms default tick, which shows up as
+        # uneven frame pacing in a replay buffer.
+        $entry = @($profile.registry | Where-Object { $_.name -eq 'GlobalTimerResolutionRequests' })
+        $entry.Count | Should -Be 1
+        $entry[0].hive | Should -Be 'SYSTEM'
+        $entry[0].path | Should -Be 'ControlSet001\Control\Session Manager\kernel'
+        $entry[0].type | Should -Be 'REG_DWORD'
+        "$($entry[0].value)" | Should -Be '1'
+    }
+
+    It 'keeps the timer setting in a group that has a workflow toggle' {
+        # The workflow is at GitHub's 25-input cap for workflow_dispatch, so a new group
+        # could not be given a checkbox. Asserting the group here documents that the
+        # setting is intentionally riding an existing, always-on group rather than
+        # being orphaned in a group nobody can enable.
+        $entry = @($profile.registry | Where-Object { $_.name -eq 'GlobalTimerResolutionRequests' })[0]
+        $profile.defaultGroups.PSObject.Properties.Name | Should -Contain $entry.group
+        $profile.defaultGroups.($entry.group) | Should -BeTrue
+        $profile.groupDescriptions.PSObject.Properties.Name | Should -Contain $entry.group
+    }
+
+    It 'reverts the timer setting back to the Windows default' {
+        # Windows ships this value absent, which behaves like 0. The revert block can
+        # only set values, so 0 is the correct restore.
+        $rev = @($profile.revert.reversible | Where-Object { $_.name -eq 'GlobalTimerResolutionRequests' })
+        $rev.Count | Should -Be 1
+        "$($rev[0].value)" | Should -Be '0'
+    }
+
+    It 'ships the capture guide inside the image' {
+        Test-Path -LiteralPath $obsGuidePath | Should -BeTrue
+        $engineRaw | Should -Match 'OBS-SETTINGS\.md'
+        $engineRaw | Should -Match 'Split-Path \$ScriptRoot -Parent'
+    }
+
+    It 'the guide covers the settings that actually decide frame pacing' {
+        # A guide that omits these would be the generic "apply these tweaks" list this
+        # project is trying to avoid.
+        $guide = Get-Content -LiteralPath $obsGuidePath -Raw
+        foreach ($topic in @('frame cap', 'CQP', 'replay buffer', 'rendering lag', 'encoding lag')) {
+            $guide | Should -Match ([regex]::Escape($topic))
+        }
+        # And it must not pretend the OS fixes saturation.
+        $guide | Should -Match '100%'
+    }
+
+    It 'reports capture state so the guide can be verified' {
+        $reportRaw | Should -Match 'Capture / OBS'
+        foreach ($value in @('HwSchMode', 'OverlayTestMode', 'GameDVR_FSEBehaviorMode', 'PowerThrottlingOff', 'GlobalTimerResolutionRequests')) {
+            $reportRaw | Should -Match ([regex]::Escape($value))
+        }
+    }
+
+    It 'does not write the same registry value twice' {
+        # Keyed on hive+path+name, not name alone: 'Flags' legitimately appears at three
+        # different accessibility paths. A repeated full key would be two sources of
+        # truth for one setting.
+        $keys = @($profile.registry | ForEach-Object { "$($_.hive)|$($_.path)|$($_.name)".ToLower() })
+        $dupes = @($keys | Group-Object | Where-Object { $_.Count -gt 1 })
+        $dupes.Count | Should -Be 0
+    }
+}

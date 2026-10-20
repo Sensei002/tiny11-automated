@@ -18,6 +18,7 @@ Rainbow Six Siege on a CPU-bound machine.
 - [The essentials pass](#the-essentials-pass)
 - [The power scheme](#the-power-scheme)
 - [Device latency and 1% lows](#device-latency-and-1-lows)
+- [Capture and recording](#capture-and-recording)
 - [Instant window response](#instant-window-response)
 - [Game runtimes](#game-runtimes)
 - [What breaks](#what-breaks)
@@ -89,7 +90,7 @@ Group names match the workflow input names exactly.
 |---|---|
 | `network_latency_tweaks` | Nagle's algorithm off (global + per-adapter at first boot), QoS reserved bandwidth set to 0, Delivery Optimization P2P off, WU auto-reboot blocked |
 | `disable_mpo` | Disables Multi-Plane Overlay (`Dwm\OverlayTestMode=5`) — the standard fix for flicker and micro-stutter on some NVIDIA/AMD drivers |
-| `latency_input_tweaks` | Mouse acceleration off, Sticky Keys / Toggle Keys hotkeys off, DXGI flip model enabled with VRR optimisation on, USB 3 link power management off |
+| `latency_input_tweaks` | Mouse acceleration off, Sticky Keys / Toggle Keys hotkeys off, DXGI flip model enabled with VRR optimisation on, USB 3 link power management off, global 1 ms timer resolution requests restored — see [Capture and recording](#capture-and-recording) |
 | `interrupt_latency` | Per-device work that only exists on a live machine: MSI interrupts with high priority, NIC interrupt moderation off / RSS on / EEE and flow control off, USB and HID power management off — see [Device latency](#device-latency-and-1-lows) |
 | `disable_fso` | Forces true fullscreen exclusive instead of Fullscreen Optimizations |
 
@@ -411,6 +412,69 @@ MSI is the one setting here with a real (if small) hardware risk. It is written 
 where the driver has already published `MessageSignaledInterruptProperties` — that key
 means the driver claims MSI support. A device that rejects the flag keeps its line
 interrupt and still boots; nothing here can prevent boot.
+
+---
+
+## Capture and recording
+
+If you record or stream from the same machine you play on, the bottleneck is almost never
+a registry value. On a single GPU the game and the encoder compete for the same silicon,
+and the only real fixes are a frame cap and sane encoder settings. This section covers what
+the image does, what it deliberately does not do, and where the rest of the answer lives.
+
+The full operator guide ships inside the image at
+`C:\Windows\Tiny11Gaming\OBS-SETTINGS.md`. The repo copy is [OBS-SETTINGS.md](OBS-SETTINGS.md).
+
+### What the image sets for capture
+
+Most of the usual "OBS optimisation" list is already applied by other groups — power
+throttling off, PCIe link state off, USB selective suspend off, Game DVR off, MMCSS at
+maximum, `Win32PrioritySeparation=38`. Do not re-apply those by hand.
+
+One value exists specifically for capture:
+
+| Value | Where | Why |
+|---|---|---|
+| `GlobalTimerResolutionRequests=1` | `latency_input_tweaks` → `SYSTEM\ControlSet001\Control\Session Manager\kernel` | Windows 10 2004 made 1 ms timer resolution a per-process request and stopped honouring it from background processes. A recorder that is not the foreground window then sits on the default ~15.6 ms tick, which shows up as uneven frame pacing rather than low average FPS. This restores the pre-2004 global behaviour. |
+
+It lives in `latency_input_tweaks` rather than a group of its own because the workflow is
+already at GitHub's 25-input cap for `workflow_dispatch` — a new group could not be given a
+toggle. It is applied by default, like the rest of that group.
+
+### Two defaults that can work against you
+
+Both are on by default and both are worth testing if capture is worse than expected:
+
+- **`disable_fso` forces true fullscreen exclusive.** OBS's game-capture hook is weakest
+  there. Try `-GamingGroups @{ disable_fso = $false }`.
+- **`disable_mpo`** fixes flicker and micro-stutter, but on some driver versions it costs
+  desktop-composition performance and hurts display capture. Try
+  `-GamingGroups @{ disable_mpo = $false }`.
+
+HAGS is on by default (`HwSchMode=2`); it is not universal either, so it is exposed as the
+`hags` input rather than hardcoded.
+
+### What is deliberately not done
+
+- **No per-vendor GPU power-mode edits.** "Prefer maximum performance" belongs in the
+  driver profile, where it is supported and reversible.
+- **No NVENC session-limit patching.** That needs a modified driver; it is not a registry
+  change and it is not something an ISO should do silently.
+- **No process-priority hacks for OBS.** The guide tells you to set Above Normal in OBS.
+  Pinning a specific executable's priority from an offline image would not survive an OBS
+  update.
+- **No standby-list or timer "optimisers".** Same reason they are rejected elsewhere in
+  this document.
+
+### Verifying what you got
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Windows\Tiny11Gaming\Tiny11-Report.ps1
+```
+
+The **Capture / OBS** section prints HAGS, MPO, FSO, Game DVR, power throttling, timer
+resolution, the DXGI/VRR string, the GPU list and OBS's own process priority when it is
+running. That is the check against the table above — not an assumption.
 
 ---
 

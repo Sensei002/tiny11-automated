@@ -639,6 +639,18 @@ function New-GamingFirstBootPayload {
         Write-GamingLog "  MISSING gaming_profile.json - revert will be unavailable" 'WARN'
     }
 
+    # Capture / recording guide. Prose rather than data, because what it mostly has to
+    # say is about OBS settings the OS cannot set for you. It ships next to the state
+    # report so a reader can check what this image actually did against what the guide
+    # assumes. Lives at the repo root, one level above the scripts directory.
+    $obsGuide = Join-Path (Split-Path $ScriptRoot -Parent) 'OBS-SETTINGS.md'
+    if (Test-Path -LiteralPath $obsGuide) {
+        Copy-Item -LiteralPath $obsGuide -Destination (Join-Path $gamingDir 'OBS-SETTINGS.md') -Force
+        Write-GamingLog "  staged OBS-SETTINGS.md"
+    } else {
+        Write-GamingLog "  OBS-SETTINGS.md not found at $obsGuide - capture guide will be missing from the image" 'WARN'
+    }
+
     # Group flags consumed by gaming-firstboot.ps1 on the target machine.
     $groupsFile = [ordered]@{
         profile     = $Profile.profile
