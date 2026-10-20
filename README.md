@@ -108,6 +108,7 @@ This project is based on the original [tiny11 builder by ntdevlabs](https://gith
 
 <a href="https://sourceforge.net/p/tiny-11-releases/"><img alt="Download Tiny 11 Releases" src="https://sourceforge.net/sflogo.php?type=18&amp;group_id=3937094" width=200></a>
 - **Pre-built ISOs**: [SourceForge](https://sourceforge.net/projects/tiny-11-releases/files/) (Primary source)
+- **Sensei's Pre Built ISO**: [SourceForge](https://sourceforge.net/projects/tiny11-automated/files/)
 - **Release Notes**: [GitHub Releases](https://github.com/kelexine/tiny11-automated/releases)
 - **Source Code**: [GitHub Repository](https://github.com/kelexine/tiny11-automated)
 
@@ -282,14 +283,17 @@ Siege on a CPU-bound machine.
 
 | Area | Changes |
 |------|---------|
-| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle |
+| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle, plus the energy-performance preference and boost policy that HWP/CPPC CPUs actually act on, and no storage-link power saving |
 | **CPU** | Power throttling off, `SystemResponsiveness` = 10 (AtlasOS value) |
 | **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
-| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on |
+| **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on with VRR optimisation on · USB 3 link power management off |
+| **Device latency** | At first boot, on the live machine: **MSI interrupts** with high priority for GPU and NIC, NIC interrupt moderation off, RSS on, EEE / flow control / RSC / LSO off, USB and HID power management off. This is the layer that moves **1% lows** rather than average FPS — see [GAMING.md](GAMING.md#device-latency-and-1-lows) |
 | **Display** | Fullscreen Optimizations **off** (true fullscreen exclusive) |
 | **Window response** | Animations off, menu/hover delays 400 ms → 0, acrylic transparency off, and the app-close timeouts cut (20 s → 2 s) so windows open and close instantly |
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
+| **Essentials** | The post-install debloat pass, **baked in and always on**: activity history, BitLocker auto-encryption, delivery optimization, location, telemetry, WPBT, OneDrive, Windows AI, Widgets, Store recommendations, device companion apps, the classic right-click and Start layouts, plus **58 services** moved to manual or disabled. Takes a fresh install from ~100–115 processes to **50–65**. No toggle — see [GAMING.md](GAMING.md#the-essentials-pass) |
+| **Defender & Update** | Windows Defender / Security **removed outright**, plus the entire Windows Update stack — service, Update Medic, Update Orchestrator and the Settings entry. Always on for Core-Gaming; not a group toggle |
 
 Game runtimes (VC++, DirectX 9.0c, .NET Desktop) are deliberately **not** bundled — see
 [GAMING.md](GAMING.md#game-runtimes) for why and what to install yourself.
@@ -303,8 +307,8 @@ can dial any of it back per build.
 **Locally:**
 
 ```powershell
-# Full Core-Gaming build
-.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender -PreserveWinRE
+# Full Core-Gaming build (Defender + Windows Update are removed automatically)
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -PreserveWinRE
 
 # Dial specific groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
@@ -360,13 +364,16 @@ tiny11-automated/
 ├── config/
 │   ├── matrix_config.json              # Release-detection / trigger config
 │   ├── gaming_profile.json             # 🎮 Every gaming tweak, group-tagged
-│   └── gaming_power_settings.json      # 🎮 Power scheme + bcdedit definition
+│   ├── gaming_power_settings.json      # 🎮 Power scheme + bcdedit definition
+│   └── essentials_profile.json         # 🎮 Debloat pass, one entry per checkbox
 ├── scripts/
 │   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core (+ -GamingProfile)
 │   ├── nano11builder-headless.ps1        # ✨ Automated Nano
 │   ├── gaming-profile.ps1                # 🎮 Profile engine (dot-sourced)
+│   ├── essentials-profile.ps1            # 🎮 Debloat engine (always on for Core-Gaming)
 │   ├── gaming-firstboot.ps1              # 🎮 Runs once as SYSTEM on the target
+│   ├── Tiny11-Report.ps1                 # 🎮 Post-install report, ships in the image
 │   └── Undo-GamingTweaks.ps1             # 🎮 Revert, shipped inside the image
 ├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
@@ -552,7 +559,8 @@ account screen.
 - Steps Recorder
 - LA57 CPU compatibility layer
 - Language features (OCR, Speech, Handwriting)
-- Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input)
+- Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input; always removed on Core-Gaming)
+- Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings entry (hidden via policy; Core-Gaming only — a plain Core build only disables it)
 - Printer drivers (Nano only)
 - Scanner/MFD drivers (Nano only)
 
@@ -814,6 +822,7 @@ remove_defender:        # 🆕 Completely remove Windows Defender / Security
   type: boolean
   default: false
   # No Antimalware service will be present in the finished image
+  # Redundant on Core-Gaming, which always removes Defender and Windows Update
 
 account_setup:          # 🆕 Local account setup
   type: choice
@@ -869,9 +878,10 @@ disable_game_mode:          # Game Mode off (AtlasOS default)
 disable_printing:           # Print services + features removed
 ```
 
-The build also validates `config/gaming_profile.json` and parses
-`scripts/gaming-profile.ps1` **before** downloading the ISO, so a typo fails in seconds
-instead of after an hour.
+The build also validates `config/gaming_profile.json` and `config/essentials_profile.json`,
+and parses both profile engines, **before** downloading the ISO, so a typo fails in
+seconds instead of after an hour. The essentials profile is validated against a
+boot-critical service list, so a bad edit cannot produce an unbootable image.
 
 Full details: **[GAMING.md](GAMING.md)**
 

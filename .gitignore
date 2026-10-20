@@ -42,3 +42,15 @@ Desktop.ini
 .vscode/
 .idea/
 *.swp
+
+# Assistant/agent workspace.
+# Holds local scratch scripts, CI job logs and machine-specific notes. Never
+# belongs in a public repo -- may contain paths, hostnames or credentials.
+.workbuddy-ai/
+
+# SourceForge / FileZilla credentials and client state. The real FileZilla
+# config lives in %APPDATA%\FileZilla (outside this repo), but ignore any
+# stray copies so a password can never be committed.
+sitemanager.xml
+recentservers.xml
+filezilla.xml

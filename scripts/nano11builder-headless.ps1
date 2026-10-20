@@ -1128,8 +1128,11 @@ function Apply-RegistryTweaks {
     # intentionally absent. (Companion to the Remove-WinRE build-time deletion.)
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
 
-    # Hide settings pages
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:virus;windowsupdate'
+    # Hide both Settings pages. Page ids are the ms-settings URI minus the
+    # 'ms-settings:' prefix, so the Windows Security page is 'windowsdefender'.
+    # This value used to read 'hide:virus;windowsupdate' - 'virus' is not a
+    # Windows 11 page id, so it hid nothing.
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'
 
     # Easter Egg / Branding
     Write-Log "Adding Easter Egg branding..."
@@ -1209,9 +1212,11 @@ function Apply-PerformanceTweaks {
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Power' 'HiberbootEnabled' 'REG_DWORD' '0'
     # Keep crash dump on BSOD — preserves minidump for analysis instead of silent restart
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\CrashControl' 'AutoReboot' 'REG_DWORD' '0'
-    # BCD: short boot menu + disable dynamic tick for lower timer interrupt latency (gaming)
+    # BCD: short boot menu + keep the system timer from going tickless while idle.
+    # 'useplatformtick yes' is deliberately NOT set: it forces the platform timer
+    # (HPET-class) as the tick source, which is slower than the invariant TSC.
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneBCD' 'REG_SZ' `
-        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /set disabledynamictick yes 2>&1 | Out-Null; & bcdedit /set useplatformtick yes 2>&1 | Out-Null"'
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /set disabledynamictick yes 2>&1 | Out-Null; & bcdedit /deletevalue useplatformtick 2>&1 | Out-Null"'
 
     Write-Log "Performance optimizations applied (gaming/VM profile)"
 }

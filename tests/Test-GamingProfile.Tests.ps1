@@ -127,6 +127,21 @@ Describe 'Gaming profile JSON' {
         $profile.defaultGroups.disable_fso                 | Should -BeTrue
     }
 
+    It 'enables the device-latency group by default' {
+        $profile.defaultGroups.interrupt_latency | Should -BeTrue
+    }
+
+    It 'leaves VRR optimisation ON in the DirectX global settings' {
+        # It was 0 in an earlier revision. 0 tells DWM not to align presentation to the
+        # display's refresh window, which is the opposite of what frame pacing wants.
+        $entry = $profile.registry |
+            Where-Object { $_.name -eq 'DirectXUserGlobalSettings' }
+        $entry | Should -Not -BeNullOrEmpty
+        $entry.value | Should -Match 'SwapEffectUpgradeEnable=1'
+        $entry.value | Should -Match 'VRROptimizeEnable=1'
+        $entry.value | Should -Not -Match 'VRROptimizeEnable=0'
+    }
+
     It 'sets SystemResponsiveness to the AtlasOS value of 10' {
         $entry = $profile.registry |
             Where-Object { $_.name -eq 'SystemResponsiveness' }
@@ -256,6 +271,37 @@ Describe 'Gaming power settings JSON' {
         @($power.bcd).Count | Should -BeGreaterThan 0
         ($power.bcd | Where-Object { $_.args -match 'hypervisorlaunchtype off' }) | Should -Not -BeNullOrEmpty
     }
+
+    It 'sets the energy-performance preference and boost policy under disable_cpu_idle' {
+        $epp = $power.settings | Where-Object { $_.setting -eq '36687f9e-e3a5-4dbf-b1dc-15eb381c6863' }
+        $epp | Should -Not -BeNullOrEmpty
+        $epp.ac | Should -Be 0
+        $epp.group | Should -Be 'disable_cpu_idle'
+        $epp.beyondAtlas | Should -BeTrue
+
+        $boost = $power.settings | Where-Object { $_.setting -eq '45bcc044-d885-43e2-8605-ee0ec6e96b59' }
+        $boost | Should -Not -BeNullOrEmpty
+        $boost.ac | Should -Be 100
+        $boost.group | Should -Be 'disable_cpu_idle'
+    }
+
+    It 'keeps the storage and USB links out of low-power states' {
+        $ahci = $power.settings | Where-Object { $_.setting -eq '0b2d69d7-a2a1-449c-9680-f91c70521c60' }
+        $ahci | Should -Not -BeNullOrEmpty
+        $ahci.ac | Should -Be 0
+
+        $usb3 = $power.settings | Where-Object { $_.setting -eq 'd4e98f31-5ffe-4ce1-be31-1b38b384c009' }
+        $usb3 | Should -Not -BeNullOrEmpty
+        $usb3.ac | Should -Be 0
+        $usb3.group | Should -Be 'latency_input_tweaks'
+    }
+
+    It 'deletes useplatformtick instead of setting it' {
+        # Forcing the platform tick source is slower than the invariant TSC, so the
+        # profile must never re-introduce it.
+        ($power.bcd | Where-Object { $_.args -match '/set\s+useplatformtick\s+yes' }) | Should -BeNullOrEmpty
+        ($power.bcd | Where-Object { $_.args -match '/deletevalue\s+useplatformtick' }) | Should -Not -BeNullOrEmpty
+    }
 }
 
 Describe 'Gaming profile engine' {
@@ -365,6 +411,35 @@ Describe 'First-boot and undo scripts' {
         $content | Should -Match 'powercfg -duplicatescheme'
         $content | Should -Match 'powercfg -changename'
         $content | Should -Match 'powercfg -setactive'
+    }
+
+    It 'first-boot script applies the device-latency layer' {
+        $content = Get-Content -LiteralPath $firstBootPath -Raw
+        foreach ($fn in @(
+            'Set-GamingInterruptLatency', 'Set-GamingNetworkAdapter',
+            'Set-GamingUsbPower', 'Set-GamingMemoryCompression'
+        )) {
+            $content | Should -Match ("function\s+$([regex]::Escape($fn))\b")
+        }
+    }
+
+    It 'only enables MSI where the driver already publishes MSI properties' {
+        # This is the safety property: forcing MSI on a device that cannot do it is how
+        # a latency tweak turns into a machine that will not boot.
+        $content = Get-Content -LiteralPath $firstBootPath -Raw
+        $content | Should -Match 'MessageSignaledInterruptProperties'
+        $content | Should -Match 'Test-Path -LiteralPath \$msiKey'
+    }
+
+    It 'honours group gating for bcdedit entries' {
+        $content = Get-Content -LiteralPath $firstBootPath -Raw
+        $content | Should -Match '\$entry\.group'
+        $content | Should -Match '-Groups \$groups'
+    }
+
+    It 'core builder no longer sets useplatformtick' {
+        $content = Get-Content -LiteralPath $builderPath -Raw
+        $content | Should -Not -Match 'bcdedit /set useplatformtick yes'
     }
 
     It 'undo script reads its instructions from the bundled profile' {
@@ -540,5 +615,93 @@ Describe 'Profile engine functional behaviour' {
         $bad = $script:EngineProfile | ConvertTo-Json -Depth 20 | ConvertFrom-Json
         $bad.PSObject.Properties.Remove('services')
         { Test-GamingProfile -Profile $bad } | Should -Throw '*missing required key*'
+    }
+}
+
+Describe 'Core-Gaming always removes Defender and Windows Update' {
+
+    BeforeAll {
+        $builder = Get-Content -LiteralPath $builderPath -Raw
+        $gamingGate = [regex]::Escape('if ($RemoveDefender -or $GamingProfile) {')
+    }
+
+    It 'defines the Windows Update removal functions' {
+        $builder | Should -Match 'function Remove-WindowsUpdatePayload'
+        $builder | Should -Match 'function Remove-WindowsUpdateStack'
+    }
+
+    It 'calls both halves of the Windows Update removal under the gaming gate' {
+        foreach ($fn in @('Remove-WindowsUpdatePayload', 'Remove-WindowsUpdateStack')) {
+            $callIndex = Get-MainCallIndex -Content $builder -Name $fn
+            $callIndex | Should -BeGreaterThan 0
+
+            # The nearest preceding gate must be the plain -GamingProfile one, not
+            # something weaker that a Core build could also satisfy.
+            $gateIndex = $builder.Substring(0, $callIndex).LastIndexOf('if ($GamingProfile)')
+            $gateIndex | Should -BeGreaterThan 0
+            ($callIndex - $gateIndex) | Should -BeLessThan 200
+        }
+    }
+
+    It 'deletes the three services that make a WU disable stick' {
+        # WaaSMedicSvc repairs a disabled Windows Update, UsoSvc runs the boot
+        # servicing pass, wuauserv is Windows Update itself. Leaving any of them is
+        # what lets "Updates are underway, do not turn off your PC" come back.
+        foreach ($service in @('WaaSMedicSvc', 'UsoSvc', 'wuauserv')) {
+            $builder | Should -Match ([regex]::Escape("'$service'"))
+        }
+    }
+
+    It 'removes the Update Orchestrator scheduled tasks' {
+        $builder | Should -Match ([regex]::Escape('Tasks\Microsoft\Windows\UpdateOrchestrator'))
+    }
+
+    It 'sets the NoAutoUpdate policy' {
+        $builder | Should -Match ([regex]::Escape("WindowsUpdate\AU' 'NoAutoUpdate'"))
+    }
+
+    It 'hides both Settings pages using valid Windows 11 page ids' {
+        # Page ids are the ms-settings URI minus the 'ms-settings:' prefix. The
+        # Windows Security page is 'windowsdefender'; 'virus' is not a page id.
+        # Asserted against the write itself rather than the bare string, so the
+        # comment above the write site can keep documenting the old broken value.
+        $builder | Should -Match 'hide:windowsupdate;windowsdefender'
+        $builder | Should -Not -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:virus"))
+    }
+
+    It 'writes the Settings page visibility value from exactly one place' {
+        # Two write sites made the shipped value depend on call order - the gaming
+        # function ran last and won. Asserting a single write site removes the
+        # ordering question entirely, instead of pinning the order down.
+        ([regex]::Matches($builder, "SettingsPageVisibility' 'REG_SZ")).Count | Should -Be 1
+    }
+
+    It 'removes only the WU client executables, not the shared DLLs' {
+        # wuaueng.dll and wuapi.dll are linked by other inbox components and a
+        # missing DLL fails hard, so they are deliberately kept.
+        $builder | Should -Match ([regex]::Escape("'Windows\System32\wuauclt.exe'"))
+        $builder | Should -Match ([regex]::Escape("'Windows\System32\wuapihost.exe'"))
+        $builder | Should -Not -Match ([regex]::Escape("'Windows\System32\wuaueng.dll'"))
+        $builder | Should -Not -Match ([regex]::Escape("'Windows\System32\wuapi.dll'"))
+    }
+
+    It 'removes Defender on a Core-Gaming build, not only with -RemoveDefender' {
+        $builder | Should -Match $gamingGate
+        ([regex]::Matches($builder, $gamingGate)).Count | Should -Be 2
+    }
+
+    It 'leaves the plain Core Windows Update disable in place' {
+        # Regression guard: a plain Core build must keep the weaker localhost +
+        # Start=4 disable. It now inherits the single, corrected page-visibility
+        # write rather than shipping a copy of its own.
+        $builder | Should -Match ([regex]::Escape("Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess'"))
+        $builder | Should -Match ([regex]::Escape("'HKLM\zSYSTEM\ControlSet001\Services\wuauserv' 'Start' 'REG_DWORD' '4'"))
+        $builder | Should -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'"))
+    }
+
+    It 'does not touch DoSvc, which belongs to the profile groups' {
+        # DoSvc is owned by strip_background_noise, so an unconditional delete here
+        # would ignore that group's toggle.
+        $builder | Should -Not -Match ([regex]::Escape("'DoSvc'"))
     }
 }

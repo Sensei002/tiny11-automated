@@ -7,6 +7,11 @@
 # Everything from "Build and Release Tiny11 Core" is preserved. The extra inputs below
 # map 1:1 onto the groups in config/gaming_profile.json, so any of them can be turned
 # off per build without touching the profile file.
+#
+# The Windows 11 ISO is resolved at run time: leaving windows_iso_url empty makes the
+# workflow mint a fresh, language-specific link from Microsoft (scripts/resolve-windows-iso.ps1).
+# Microsoft's links are signed and expire about 24 hours after generation, so resolving at
+# run time avoids the stale-link failures a pasted URL suffers from.
 
 name: Build and Release Tiny11 Core-Gaming
 
@@ -18,9 +23,9 @@ on:
         required: false
         default: '26H2'
       windows_iso_url:
-        description: 'Windows 11 ISO download URL'
-        required: true
-        default: 'https://software.download.prss.microsoft.com/dbazure/Windows11_Client_x64_en-us_26300_9457.iso?t=80c8fc30-ff56-4c95-8024-adc31f3918cb&P1=1791748912&P2=602&P3=2&P4=iVKrQtUXouUQIrGM81OYIB8hRan2qtmXe2qAIEU3Yt4EcqV0aHWqRtPrWr3q%2bwB2mhxz9795hHc%2bNp1MsjJjJU9mIL5SZPD13Aw1ZxH5O6oANHYS84G3k%2f0JZbPiBIe5%2bG8CpdpAJhq6n5yzYgajyGkmgvmVYmidHOPO3BehAgfu3hwqFk9uozIrikhCkr2Rk6u6yT4%2f1Al4V5duQjJUDqT2irslL%2fRe5qh1wRH%2bADoHxUsN%2fIJt6yzx%2fRa5%2fx9n7nJTIjOj7Dlg1Zdf1oc%2bES4JSzrur6TRuGjTZAVSKSyobiBJAe3s6FkhW7boGWvUzdyHF2qc%2fBNhjuJPh9HB0g%3d%3d'
+        description: 'Optional. Leave EMPTY to resolve a fresh, language-specific link from Microsoft at run time (recommended - Microsoft links expire ~24h). Set only to pin one specific ISO.'
+        required: false
+        default: ''
       windows_build:
         description: 'Fallback Windows build number (e.g. 26200.8655) — only used if it cannot be read directly from the ISO'
         required: false
@@ -36,9 +41,49 @@ on:
           - '6'
           - '7'
       language:
-        description: 'Language (e.g., English, Spanish, French)'
+        description: 'ISO language - the same list Microsoft''s own download page offers. Used to resolve a fresh download link when windows_iso_url is left empty.'
+        type: choice
         required: false
-        default: 'English'
+        default: 'English (United States)'
+        options:
+          - 'Arabic'
+          - 'Brazilian Portuguese'
+          - 'Bulgarian'
+          - 'Chinese Simplified'
+          - 'Chinese Traditional'
+          - 'Croatian'
+          - 'Czech'
+          - 'Danish'
+          - 'Dutch'
+          - 'English (United States)'
+          - 'English International'
+          - 'Estonian'
+          - 'Finnish'
+          - 'French'
+          - 'French Canadian'
+          - 'German'
+          - 'Greek'
+          - 'Hebrew'
+          - 'Hungarian'
+          - 'Italian'
+          - 'Japanese'
+          - 'Korean'
+          - 'Latvian'
+          - 'Lithuanian'
+          - 'Norwegian'
+          - 'Polish'
+          - 'Portuguese'
+          - 'Romanian'
+          - 'Russian'
+          - 'Serbian Latin'
+          - 'Slovak'
+          - 'Slovenian'
+          - 'Spanish'
+          - 'Spanish (Mexico)'
+          - 'Swedish'
+          - 'Thai'
+          - 'Turkish'
+          - 'Ukrainian'
       skip_cleanup:
         description: 'Skip cleanup (for debugging)'
         required: false
@@ -55,7 +100,7 @@ on:
         required: false
         default: false
       remove_defender:
-        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image'
+        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender and the whole Windows Update stack.'
         type: boolean
         required: false
         default: false
@@ -124,7 +169,12 @@ on:
         required: false
         default: true
       latency_input_tweaks:
-        description: 'Gaming: Disable mouse acceleration and accessibility hotkeys; enable the DXGI flip model.'
+        description: 'Gaming: Disable mouse acceleration and accessibility hotkeys; enable the DXGI flip model; turn off USB 3 link power management.'
+        type: boolean
+        required: false
+        default: true
+      interrupt_latency:
+        description: 'Gaming: Per-device latency work at first boot - MSI interrupts with high priority for GPU/NIC, NIC interrupt moderation off + RSS on, USB/HID power management off. Targets 1% lows rather than average FPS.'
         type: boolean
         required: false
         default: true
@@ -186,7 +236,14 @@ jobs:
           }
           $edition = $editions[$index]
 
-          $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z]', ''
+          # The language now comes from a dropdown whose values are spelled exactly as
+          # Microsoft spells them, e.g. 'English (United States)'. Filenames cannot carry
+          # spaces or brackets, so every non-alphanumeric is dropped:
+          #   'English (United States)' -> 'EnglishUnitedStates'
+          #   'Spanish (Mexico)'        -> 'SpanishMexico'
+          # Keeping the qualifier matters - 'Spanish' and 'Spanish (Mexico)' are different
+          # ISOs, and a bare 'Spanish' filename would make them indistinguishable.
+          $language = "${{ github.event.inputs.language }}" -replace '[^a-zA-Z0-9]', ''
 
           $folderName = "Tiny11CoreGaming-$edition-$version"
 
@@ -234,6 +291,44 @@ jobs:
           $null = [System.Management.Automation.Language.Parser]::ParseFile(
             (Resolve-Path "scripts\gaming-profile.ps1"), [ref]$null, [ref]$null)
           Write-Output "gaming-profile.ps1 parsed cleanly"
+
+      - name: Validate essentials profile
+        shell: pwsh
+        run: |
+          # The essentials pass has no toggle, so there is no way to skip it at build
+          # time if the data is wrong. Validate with the real engine, which also runs
+          # the boot-critical service guard - that is the check that stops a bad edit
+          # from producing an unbootable image.
+          $essentialsPath = "config\essentials_profile.json"
+          if (-not (Test-Path $essentialsPath)) {
+            Write-Error "Essentials profile not found at $essentialsPath"
+            exit 1
+          }
+
+          . "scripts\essentials-profile.ps1"
+          Initialize-EssentialsModule -LogFile $null -ProfileDirectory "config"
+
+          try {
+            $essentials = Import-EssentialsProfile -Path $essentialsPath
+          } catch {
+            Write-Error "Essentials profile is invalid: $_"
+            exit 1
+          }
+
+          Write-Output "Essentials pass: $($essentials.profile) (schema $($essentials.schemaVersion))"
+          Write-Output "Registry entries: $(@($essentials.registry).Count)"
+          Write-Output "Key deletions:    $(@($essentials.deleteKeys).Count)"
+          Write-Output "Services:         $(@($essentials.services).Count)"
+          Write-Output "  manual (3):     $(@($essentials.services | Where-Object { $_.start -eq 3 }).Count)"
+          Write-Output "  disabled (4):   $(@($essentials.services | Where-Object { $_.start -eq 4 }).Count)"
+
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts\essentials-profile.ps1"), [ref]$null, [ref]$null)
+          Write-Output "essentials-profile.ps1 parsed cleanly"
+
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "scripts\Tiny11-Report.ps1"), [ref]$null, [ref]$null)
+          Write-Output "Tiny11-Report.ps1 parsed cleanly"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -287,6 +382,84 @@ jobs:
           choco install aria2 -y --no-progress
           aria2c --version
 
+      # The two ISO steps below settle the download URL before anything expensive runs.
+      # Resolving the link and proving it is alive takes seconds; discovering a dead link
+      # after the ISO download has already started costs the whole run.
+      - name: Resolve Windows 11 ISO URL
+        # An empty windows_iso_url means "ask Microsoft for a fresh link". The links
+        # Microsoft hands out are signed and expire ~24h, so minting one at run time is
+        # more reliable than pasting one in and hoping it is still alive.
+        if: ${{ github.event.inputs.windows_iso_url == '' }}
+        shell: pwsh
+        run: |
+          $language = "${{ github.event.inputs.language }}"
+          Write-Output "No ISO URL supplied - resolving a fresh link from Microsoft for '$language'..."
+
+          try {
+            $iso = & .\scripts\resolve-windows-iso.ps1 -Language $language
+          } catch {
+            Write-Output "::error title=ISO resolve failed::$($_.Exception.Message)"
+            Write-Output ""
+            Write-Output "Microsoft's download service refused to hand out a link. This is normally"
+            Write-Output "temporary rate limiting or a blocked runner IP, and there is no way for this"
+            Write-Output "workflow to work around it."
+            Write-Output ""
+            Write-Output "Fallback: download the ISO in a browser from"
+            Write-Output "  https://www.microsoft.com/software-download/windows11"
+            Write-Output "then re-run this workflow with that URL pasted into 'windows_iso_url'."
+            exit 1
+          }
+
+          Write-Output "Resolved ISO: $($iso.FileName)"
+          Write-Output "  language : $($iso.Language)"
+          Write-Output "  SKU id   : $($iso.SkuId)"
+
+          # Kept out of the log above: the URL carries a signed token.
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_ISO_URL=$($iso.Url)"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_LANGUAGE=$($iso.Language)"
+
+      - name: Use supplied Windows 11 ISO URL
+        if: ${{ github.event.inputs.windows_iso_url != '' }}
+        shell: pwsh
+        run: |
+          Write-Output "A windows_iso_url was supplied - skipping auto-resolve."
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_ISO_URL=${{ github.event.inputs.windows_iso_url }}"
+          Add-Content -Path $env:GITHUB_ENV -Value "ISO_LANGUAGE=${{ github.event.inputs.language }}"
+
+      - name: Preflight - validate Windows ISO URL
+        shell: pwsh
+        run: |
+          $url = $env:WINDOWS_ISO_URL
+
+          # Microsoft's dbazure links are signed and time-limited (?t=...&P1=...&P4=...).
+          # They expire roughly 24 hours after generation, so even a pinned URL can be dead
+          # before the download starts. A single HEAD request settles it in under a second
+          # and downloads zero bytes.
+          $safeUrl = ($url -split '\?')[0]
+          Write-Output "Checking ISO link: $safeUrl"
+
+          $code = (& curl.exe -s -I -L --max-time 30 -o NUL -w '%{http_code}' "$url").Trim()
+
+          # Some endpoints reject HEAD outright; fall back to a 1-byte ranged GET before
+          # concluding the link is dead, so we never fail a valid URL over a probe quirk.
+          if ($code -notin @('200', '206')) {
+            Write-Output "HEAD returned HTTP $code - retrying with a 1-byte ranged GET..."
+            $code = (& curl.exe -s -L --max-time 30 -r 0-0 -o NUL -w '%{http_code}' "$url").Trim()
+          }
+
+          Write-Output "ISO link responded with HTTP $code"
+
+          if ($code -notin @('200', '206')) {
+            Write-Output "::error title=Expired or invalid ISO URL::The Windows ISO link returned HTTP $code."
+            Write-Output ""
+            Write-Output "Microsoft download links are signed and expire about 24 hours after they are generated."
+            Write-Output "Get a fresh link from https://www.microsoft.com/software-download/windows11 and pass it as"
+            Write-Output "the 'windows_iso_url' input when re-running this workflow."
+            exit 1
+          }
+
+          Write-Output "ISO link is live - proceeding."
+
       - name: Display build warnings
         shell: pwsh
         run: |
@@ -315,7 +488,10 @@ jobs:
       - name: Download Windows 11 ISO
         shell: pwsh
         run: |
-          $url = "${{ github.event.inputs.windows_iso_url }}"
+          # Set by whichever of the two steps above ran: the Microsoft resolver, or the
+          # windows_iso_url input. Never read the input directly here, or auto-resolve
+          # would silently download nothing.
+          $url = $env:WINDOWS_ISO_URL
           $output = "Win11_Source.iso"
 
           Write-Output "Downloading Windows 11 ISO from Microsoft servers..."
@@ -469,6 +645,7 @@ jobs:
             network_latency_tweaks      = ("${{ github.event.inputs.network_latency_tweaks }}"      -eq 'true')
             disable_mpo                 = ("${{ github.event.inputs.disable_mpo }}"                 -eq 'true')
             latency_input_tweaks        = ("${{ github.event.inputs.latency_input_tweaks }}"        -eq 'true')
+            interrupt_latency           = ("${{ github.event.inputs.interrupt_latency }}"           -eq 'true')
             disable_fso                 = ("${{ github.event.inputs.disable_fso }}"                 -eq 'true')
             disable_game_mode           = ("${{ github.event.inputs.disable_game_mode }}"           -eq 'true')
             disable_printing            = ("${{ github.event.inputs.disable_printing }}"            -eq 'true')
