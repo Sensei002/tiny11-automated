@@ -45,7 +45,7 @@ skips that group entirely; it does not half-apply.
 ```powershell
 # Full Core-Gaming build for competitive esports
 # (Defender and the whole Windows Update stack are removed automatically)
-.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -PreserveWinRE
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile
 
 # Dial a few groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `

@@ -222,8 +222,8 @@ Set-ExecutionPolicy Bypass -Scope Process
   <tr>
     <td><strong>Windows Recovery</strong></td>
     <td>✅ Intact</td>
-    <td>⚙️ Optional (removed by default, use <code>-PreserveWinRE</code>)</td>
-    <td>⚙️ Optional (removed by default, use <code>-PreserveWinRE</code>)</td>
+    <td>✅ Intact (always kept)</td>
+    <td>✅ Intact (always kept)</td>
   </tr>
   <tr>
     <td><strong>Windows Defender</strong></td>
@@ -308,7 +308,7 @@ can dial any of it back per build.
 
 ```powershell
 # Full Core-Gaming build (Defender + Windows Update are removed automatically)
-.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -PreserveWinRE
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile
 
 # Dial specific groups back
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -HagsMode off `
@@ -406,9 +406,11 @@ tiny11-automated/
 ```powershell
 .\tiny11coremaker-headless.ps1
     [-ENABLE_DOTNET35]         # Enable .NET Framework 3.5 support
-    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x80070003)
     [-RemoveDefender]          # Completely remove Windows Defender / Security (no Antimalware service)
 ```
+
+`winre.wim` is always kept — there is no parameter to remove it. See
+*Install dies at ~10%* below for why.
 
 ### Core-Gaming Parameters
 
@@ -454,8 +456,9 @@ account screen.
     -INDEX <int>               # Image index
     [-SCRATCH <string>]        # Optional: Scratch disk
     [-SkipCleanup]             # Optional: Keep temp files
-    [-PreserveWinRE]           # Keep winre.wim intact (required for real hardware / 24H2+ to avoid 0x80070003)
 ```
+
+`winre.wim` is always kept here too — the Nano builder has no removal path.
 
 ### Examples
 
@@ -466,8 +469,8 @@ account screen.
 # Professional Edition Core with .NET 3.5
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -ENABLE_DOTNET35
 
-# Core build targeting real hardware (preserves WinRE to avoid 0x80070003 on 24H2, 25H2 and 26H2)
-.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -PreserveWinRE
+# Core build targeting real hardware (WinRE is always preserved, so 24H2/25H2/26H2 install cleanly)
+.\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6
 
 # Core build with Windows Defender / Security completely removed (no Antimalware service)
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -RemoveDefender
@@ -475,8 +478,8 @@ account screen.
 # Classic setup: create your own local account with your own name during OOBE
 .\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 1 -AccountSetup classic
 
-# Nano build with WinRE preserved (real hardware use)
-.\scripts\nano11builder-headless.ps1 -ISO E -INDEX 1 -PreserveWinRE
+# Nano build (WinRE is preserved here too - no switch exists)
+.\scripts\nano11builder-headless.ps1 -ISO E -INDEX 1
 
 # Custom scratch drive (useful for limited C:\ space)
 .\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 1 -SCRATCH D
@@ -717,7 +720,7 @@ Also worth checking:
 | Ventoy **1.1.07 or newer** | Older releases have known virtual-drive bugs |
 | Data partition is **NTFS**, not exFAT | exFAT is a documented cause of this error |
 | The ISO is **not** on the 32 MB `VTOYEFI` partition | Ventoy only scans the first, large partition |
-| Core/Nano on real hardware: pass **`-PreserveWinRE`** | Removing `winre.wim` is documented to break real-hardware installs on 24H2+. The workflow now defaults this **on** — see *Install dies at ~10%* below |
+| Core/Nano on real hardware: nothing to set | WinRE is always kept. Removing `winre.wim` breaks real-hardware installs on 24H2+ at ~10%, so the builders no longer offer a way to remove it — see *Install dies at ~10%* below |
 
 The build now also refuses to emit an ISO whose `sources\` has no usable
 `install.wim`/`install.esd`, because that failure looks identical to this one. If a
@@ -729,23 +732,24 @@ the build log (`scripts/*.log`, kept by running the workflow with `skip_cleanup:
 Setup got past "Copying Windows files", reached roughly 10%, then failed. That is
 SetupHost trying to stage the recovery environment while it applies the image.
 
-Windows Setup reads `Windows\System32\Recovery\ReAgent.xml` **out of the install
-image** and stages SafeOS from whatever `ImageLocation` points at. Delete `winre.wim`
-but leave the stock `ReAgent.xml` naming it, and Setup chases a file that is not on
-the media. The ReAgent patch that used to exist ran against `boot.wim` *after*
-`install.wim` had already been committed, so it could never fix this.
+SetupHost stages SafeOS out of the install image it is applying. A build with no
+`winre.wim` has nothing to stage, and the install aborts at ~10%.
 
-Three things changed:
+Two workarounds were tried, and both failed on real hardware:
 
-* `Remove-WinRE` now zeroes `ReAgent.xml` in the OS image at the moment it deletes
-  `winre.wim`, so the invariant is *"winre.wim present, or ReAgent.xml zeroed"* —
-  never a `ReAgent.xml` pointing at a file that is gone.
-* `preserve_winre` defaults to **on**, so the default build keeps a working recovery
-  environment.
-* Before `oscdimg` runs, the build mounts the finished image read-only and **refuses to
-  publish it** if `ReAgent.xml` still names a missing `winre.wim`.
+* delete `winre.wim` and leave the stock `ReAgent.xml` — Setup chased a file that was
+  not on the media (`0x80070003`);
+* delete `winre.wim` and zero `ReAgent.xml` — still died at 10%.
 
-If you are holding an ISO built before this fix, rebuild it — the old one cannot be
+So WinRE removal was deleted from the builders entirely. There is no `-PreserveWinRE`
+switch, no `preserve_winre` workflow input, and no removal code left:
+
+* `winre.wim` stays in the image, with Microsoft's own `ReAgent.xml` beside it;
+* both builders refuse to export an image that has no `winre.wim`;
+* the Core builder mounts the exported image read-only before the ISO is assembled and
+  fails the build if `winre.wim` is missing or truncated.
+
+If you are holding an ISO built before this change, rebuild it — the old one cannot be
 patched after the fact without re-exporting the image.
 
 

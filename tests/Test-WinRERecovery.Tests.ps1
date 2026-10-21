@@ -1,40 +1,50 @@
 <#
 .SYNOPSIS
-    Regression tests for the WinRE / ReAgent.xml contract that decides whether the
-    finished ISO can be installed at all.
+    Regression tests for the WinRE contract that decides whether the finished ISO
+    can be installed at all.
 
 .DESCRIPTION
-    Windows Setup reads <install image>\Windows\System32\Recovery\ReAgent.xml while
-    it applies the image, and stages SafeOS from whatever ImageLocation points at.
-    If the build deletes winre.wim but ships the stock ReAgent.xml, Setup chases a
-    file that is not on the media and dies at ~11% with 0x80070003 - which the user
-    sees as "installation failed after 10%".
+    Windows Setup stages SafeOS out of the install image it is applying. A build
+    that ships no winre.wim gives SetupHost nothing to stage, and the install dies
+    at ~10% - which the user sees as "installation failed after 10%".
 
-    That is exactly what happened: Remove-WinRE deleted winre.wim and left
-    ReAgent.xml naming it, and the only ReAgent patch ran against boot.wim *after*
-    install.wim had already been committed. These tests pin the invariant:
+    This project tried two ways to make a WinRE-less ISO work:
 
-        an image has winre.wim, or it has a zeroed ReAgent.xml - never neither,
-        and never a ReAgent.xml that still points at a deleted image.
+      1. delete winre.wim and leave the stock ReAgent.xml - Setup chased a file
+         that was not on the media;
+      2. delete winre.wim and zero ReAgent.xml - still failed at 10% on real
+         hardware.
+
+    So WinRE is now preserved unconditionally: no switch, no workflow input, no
+    removal code. These tests pin that - the failure mode used to be configurable,
+    and a configurable failure mode is one dispatch away from coming back.
 
     Run: Invoke-Pester ./tests/Test-WinRERecovery.Tests.ps1
 #>
 
 BeforeAll {
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $builderPath = Join-Path $repoRoot 'scripts/tiny11coremaker-headless.ps1'
-    $workflowPath = Join-Path $repoRoot '.github/workflows/build-tiny11-core-gaming.yml'
 
-    $builderSource = Get-Content -LiteralPath $builderPath -Raw
-    $workflowSource = Get-Content -LiteralPath $workflowPath -Raw
+    $builderPaths = @{
+        Core = Join-Path $repoRoot 'scripts/tiny11coremaker-headless.ps1'
+        Nano = Join-Path $repoRoot 'scripts/nano11builder-headless.ps1'
+    }
 
-    # The stub ships as a single-quoted here-string; pull it out of the source so the
-    # test validates what the builder actually writes, not a copy of it.
-    $stubMatch = [regex]::Match(
-        $builderSource,
-        "(?s)\`$script:CleanReAgentXml\s*=\s*@'\r?\n(.*?)\r?\n'@"
-    )
-    $stubXml = if ($stubMatch.Success) { $stubMatch.Groups[1].Value } else { '' }
+    $workflowPaths = @{
+        'build-tiny11-core-gaming.yml' = Join-Path $repoRoot '.github/workflows/build-tiny11-core-gaming.yml'
+        'build-tiny11-core.yml'        = Join-Path $repoRoot '.github/workflows/build-tiny11-core.yml'
+        'build-nano11.yml'             = Join-Path $repoRoot '.github/workflows/build-nano11.yml'
+    }
+
+    $builderSource = @{}
+    foreach ($k in $builderPaths.Keys) {
+        $builderSource[$k] = Get-Content -LiteralPath $builderPaths[$k] -Raw
+    }
+
+    $workflowSource = @{}
+    foreach ($k in $workflowPaths.Keys) {
+        $workflowSource[$k] = Get-Content -LiteralPath $workflowPaths[$k] -Raw
+    }
 
     function Get-FunctionBody {
         param(
@@ -46,8 +56,9 @@ BeforeAll {
     }
 
     # Assertions below look at executable code only. Comments in this codebase quote
-    # the very patterns being asserted on (e.g. "return $true"), which would make a
-    # naive match report a violation that does not exist.
+    # the very patterns being asserted on (e.g. the note in the param block saying the
+    # -PreserveWinRE switch is gone), which would make a naive match report a violation
+    # that does not exist.
     function Get-FunctionCode {
         param(
             [Parameter(Mandatory = $true)][string]$Source,
@@ -56,118 +67,137 @@ BeforeAll {
         $body = Get-FunctionBody -Source $Source -Name $Name
         ($body -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
     }
+
+    # Same idea for a whole script: strip full-line comments before asserting that a
+    # symbol is absent, so explanatory prose cannot fail the test.
+    function Get-ExecutableCode {
+        param([Parameter(Mandatory = $true)][string]$Source)
+        ($Source -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+    }
 }
 
-Describe 'WinRE removal leaves a consistent image' {
+Describe 'WinRE is preserved unconditionally' {
 
-    It 'defines exactly one ReAgent stub' {
-        ([regex]::Matches($builderSource, '\$script:CleanReAgentXml\s*=\s*@''')).Count |
-            Should -Be 1
+    It 'has no PreserveWinRE switch in the <Name> builder' -ForEach @(
+        @{ Name = 'Core' }
+        @{ Name = 'Nano' }
+    ) {
+        # A switch is a toggle by another name: it keeps the broken build reachable.
+        $builderSource[$Name] | Should -Not -Match '\[switch\]\$PreserveWinRE'
+        $builderSource[$Name] | Should -Not -Match '\$PreserveWinRE'
     }
 
-    It 'ships a well-formed ReAgent.xml' {
-        $stubXml | Should -Not -BeNullOrEmpty
-        { [xml]$stubXml } | Should -Not -Throw
-
-        $doc = [xml]$stubXml
-        $doc.DocumentElement.Name | Should -Be 'WindowsRE'
+    It 'has no WinRE removal code left in the <Name> builder' -ForEach @(
+        @{ Name = 'Core' }
+        @{ Name = 'Nano' }
+    ) {
+        $code = Get-ExecutableCode -Source $builderSource[$Name]
+        $code | Should -Not -Match 'function\s+Remove-WinRE'
+        $code | Should -Not -Match 'function\s+Patch-ReAgentXml'
+        $code | Should -Not -Match 'Write-CleanReAgentXml'
+        $code | Should -Not -Match 'CleanReAgentXml'
     }
 
-    It 'zeroes every WinRE location and staging field' {
-        $doc = [xml]$stubXml
-        $re = $doc.DocumentElement
-
-        $re.WinREStaged.state   | Should -Be '0'
-        $re.InstallState.state  | Should -Be '0'
-        $re.OsInstallAvailable.state | Should -Be '0'
-        $re.ImageLocation.path  | Should -BeNullOrEmpty
-        $re.WinreLocation.path  | Should -BeNullOrEmpty
+    It 'refuses to build an image that has no winre.wim in the <Name> builder' -ForEach @(
+        @{ Name = 'Core' }
+        @{ Name = 'Nano' }
+    ) {
+        # The check has to run before the image is exported. Catching it after the
+        # export would waste the build; catching it never is how a broken ISO ships.
+        $builderSource[$Name] | Should -Match 'winre\.wim is missing from the mounted image'
+        $builderSource[$Name] | Should -Match 'WinRE preserved:'
     }
 
-    It 'does not leave a ReAgent.xml that still names a winre.wim' {
-        # Mirrors the guard in Assert-InstallImageRecoveryConsistent.
-        $stubXml | Should -Not -Match '<WinREStaged\s+state="1"'
-        $stubXml | Should -Not -Match '<ImageLocation[^>]*\spath="[^"]+"'
+    It 'parses without syntax errors: <Name>' -ForEach @(
+        @{ Name = 'Core' }
+        @{ Name = 'Nano' }
+    ) {
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $builderPaths[$Name], [ref]$null, [ref]$errors
+        ) | Out-Null
+        @($errors).Count | Should -Be 0
+    }
+}
+
+Describe 'Core flow verifies the recovery state while the image is still a WIM' {
+
+    It 'keeps a guard that requires winre.wim and rejects a truncated one' {
+        $code = Get-FunctionCode -Source $builderSource['Core'] -Name 'Assert-InstallImageRecoveryConsistent'
+        $code | Should -Not -BeNullOrEmpty
+        $code | Should -Match 'install image has no winre\.wim'
+        $code | Should -Match '\-lt 100'
     }
 
-    It 'writes the stub into the OS image when it deletes winre.wim' {
-        $body = Get-FunctionBody -Source $builderSource -Name 'Remove-WinRE'
-        $body | Should -Not -BeNullOrEmpty
-        # -CreateIfMissing is what makes this the OS image path: the invariant must
-        # hold even if the stock image had no ReAgent.xml to patch.
-        $body | Should -Match 'Write-CleanReAgentXml[^\r\n]*-CreateIfMissing'
+    It 'no longer accepts a WinRE-less image as valid' {
+        # The old guard had a branch that passed when winre.wim was absent and
+        # ReAgent.xml was zeroed. That is exactly the configuration that failed at 10%.
+        $code = Get-FunctionCode -Source $builderSource['Core'] -Name 'Assert-InstallImageRecoveryConsistent'
+        $code | Should -Not -Match 'winre\.wim removed and ReAgent\.xml zeroed'
+        $code | Should -Not -Match 'has neither winre\.wim nor ReAgent\.xml'
     }
 
-    It 'keeps a single ReAgent implementation rather than a second inline copy' {
-        $code = Get-FunctionCode -Source $builderSource -Name 'Patch-ReAgentXml'
-        $code | Should -Match 'Write-CleanReAgentXml'
-        $code | Should -Not -Match '<WindowsRE'
+    It 'mounts index 1, because the export re-indexes to a single image' {
+        # Mounting with the user's index (say 6) would fail with "index out of range"
+        # and look like a corrupt image.
+        $code = Get-FunctionCode -Source $builderSource['Core'] -Name 'Assert-InstallImageRecoveryConsistent'
+        $code | Should -Match '/Index:1'
     }
 
-    It 'never returns a value from Write-CleanReAgentXml' {
-        # Write-Log writes to the output stream, so a boolean return would hand the
-        # caller [logstring, bool] and every `-not` on it would test the array.
-        $code = Get-FunctionCode -Source $builderSource -Name 'Write-CleanReAgentXml'
-        $code | Should -Not -Match 'return\s+\$(true|false)'
-        $code | Should -Match '\$script:ReAgentXmlPatched'
-    }
-
-    It 'verifies the exported image before the ISO is built' {
-        $body = Get-FunctionBody -Source $builderSource -Name 'Create-TinyISO'
-        $body | Should -Match 'Assert-InstallImageRecoveryConsistent'
-    }
-
-    It 'inspects the image as a WIM, before the ESD conversion deletes it' {
-        # DISM mounts .ffu/.wim/.vhd/.vhdx only - a solid ESD cannot be mounted. The
-        # Core flow deletes install.wim in Convert-ToESD, so a guard that only ran from
-        # Create-TinyISO would be handed install.esd, fail to mount it, and abort every
-        # build with a misleading "the image is corrupt". The check therefore has to
-        # happen while the exported image is still a WIM.
+    It 'runs the guard after Dismount-AndExport and before Convert-ToESD' {
+        # Convert-ToESD deletes install.wim. DISM cannot mount the solid ESD that
+        # replaces it, so a guard that only ran from Create-TinyISO would be handed
+        # install.esd and abort every build with a misleading "the image is corrupt".
         #
         # LastIndexOf on purpose: these names each appear twice, once as the function
         # definition and once as the call in the main flow at the end of the script.
-        $dismountCall = $builderSource.LastIndexOf('Dismount-AndExport')
-        $assertCall = $builderSource.LastIndexOf('Assert-InstallImageRecoveryConsistent -ImagePath $wimFilePath')
-        $esdCall = $builderSource.LastIndexOf('Convert-ToESD')
+        $dismountCall = $builderSource['Core'].LastIndexOf('Dismount-AndExport')
+        $assertCall = $builderSource['Core'].LastIndexOf('Assert-InstallImageRecoveryConsistent -ImagePath $wimFilePath')
+        $esdCall = $builderSource['Core'].LastIndexOf('Convert-ToESD')
 
         $dismountCall | Should -BeGreaterThan -1
         $assertCall | Should -BeGreaterThan $dismountCall
         $esdCall | Should -BeGreaterThan $assertCall
     }
 
-    It 'never tries to mount the ESD from Create-TinyISO' {
-        # GetExtension, not a bare '.wim' match: the size-check loop earlier in the
-        # same function already mentions install.wim, so matching the literal would
-        # pass even if the skip logic were deleted.
-        $body = Get-FunctionBody -Source $builderSource -Name 'Create-TinyISO'
-        $body | Should -Match 'GetExtension'
-        $body | Should -Match 'continue'
+    It 'never mounts an image from Create-TinyISO' {
+        $code = Get-FunctionCode -Source $builderSource['Core'] -Name 'Create-TinyISO'
+        $code | Should -Not -Match 'Assert-InstallImageRecoveryConsistent'
     }
 }
 
-Describe 'Workflow defaults do not ship an un-installable image' {
+Describe 'No workflow offers a WinRE toggle' {
 
-    It 'preserves WinRE by default' {
+    It 'has no preserve_winre dispatch input: <Name>' -ForEach @(
+        @{ Name = 'build-tiny11-core-gaming.yml' }
+        @{ Name = 'build-tiny11-core.yml' }
+        @{ Name = 'build-nano11.yml' }
+    ) {
         # Line scan rather than one regex over the whole workflow: a nested-quantifier
         # pattern such as (?:\r?\n.*)*? backtracks catastrophically on a 54KB YAML file
         # and takes the whole Pester run down with it.
-        $lines = $workflowSource -split "`r?`n"
-        $start = -1
-        for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match '^      preserve_winre:\s*$') { $start = $i; break }
-        }
+        $lines = $workflowSource[$Name] -split "`r?`n"
+        @($lines | Where-Object { $_ -match '^\s+preserve_winre:\s*$' }).Count | Should -Be 0
+    }
 
-        $start | Should -BeGreaterThan -1
+    It 'never passes a WinRE flag to a builder: <Name>' -ForEach @(
+        @{ Name = 'build-tiny11-core-gaming.yml' }
+        @{ Name = 'build-tiny11-core.yml' }
+        @{ Name = 'build-nano11.yml' }
+    ) {
+        # The builders no longer accept the parameter, so a leftover flag would fail
+        # the build with "A parameter cannot be found".
+        $workflowSource[$Name] | Should -Not -Match 'PreserveWinRE'
+        $workflowSource[$Name] | Should -Not -Match 'inputs\.preserve_winre'
+    }
 
-        $defaultValue = $null
-        for ($i = $start + 1; $i -lt [Math]::Min($start + 8, $lines.Count); $i++) {
-            if ($lines[$i] -match '^ {6}[^\s]') { break }          # next top-level input
-            if ($lines[$i] -match '^\s+default:\s*(\S+)\s*$') {
-                $defaultValue = $Matches[1]
-                break
-            }
-        }
-
-        $defaultValue | Should -Be 'true'
+    It 'reports WinRE as preserved, never as removed: <Name>' -ForEach @(
+        @{ Name = 'build-tiny11-core-gaming.yml' }
+        @{ Name = 'build-tiny11-core.yml' }
+        @{ Name = 'build-nano11.yml' }
+    ) {
+        $workflowSource[$Name] | Should -Not -Match 'Removed \(stub\)'
+        $workflowSource[$Name] | Should -Not -Match 'No WinRE \(Recovery\)'
+        $workflowSource[$Name] | Should -Match 'WinRE'
     }
 }

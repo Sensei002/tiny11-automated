@@ -44,11 +44,6 @@ on:
         type: boolean
         required: false
         default: false
-      preserve_winre:
-        description: 'Preserve winre.wim (required for real hardware / 24H2+ installs to avoid 0x8007000B)'
-        type: boolean
-        required: false
-        default: false
       remove_defender:
         description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image'
         type: boolean
@@ -136,7 +131,7 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Core"
               edition = "$env:EDITION_NAME"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
             } -Compress)
         env:
@@ -335,8 +330,8 @@ jobs:
           $enableDotNet = [System.Boolean]::Parse("${{ github.event.inputs.enable_dotnet35 }}")
           Write-Output ".NET 3.5: $enableDotNet"
 
-          $preserveWinRE = [System.Boolean]::Parse("${{ github.event.inputs.preserve_winre }}")
-          Write-Output "Preserve WinRE: $preserveWinRE"
+          # WinRE is always preserved - the builder has no switch for it any more.
+          Write-Output "Preserve WinRE: always (the builder no longer has a toggle)"
 
           # Compare against the literal string so an omitted input (e.g. a
           # dispatch from the version-matrix-builder automation, which does not
@@ -354,7 +349,7 @@ jobs:
           Write-Output "ISO Drive: $($params.ISO)"
           Write-Output "Image Index: $($params.INDEX)"
           Write-Output ".NET 3.5: $enableDotNet"
-          Write-Output "Preserve WinRE: $preserveWinRE"
+          Write-Output "Preserve WinRE: always (the builder no longer has a toggle)"
           Write-Output "Remove Defender: $removeDefender"
           Write-Output "Account setup: $accountSetup"
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
@@ -362,7 +357,7 @@ jobs:
 
           $startTime = Get-Date
 
-          .\scripts\tiny11coremaker-headless.ps1 @params -ENABLE_DOTNET35:$enableDotNet -PreserveWinRE:$preserveWinRE -RemoveDefender:$removeDefender -AccountSetup $accountSetup
+          .\scripts\tiny11coremaker-headless.ps1 @params -ENABLE_DOTNET35:$enableDotNet -RemoveDefender:$removeDefender -AccountSetup $accountSetup
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Core build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
@@ -460,7 +455,7 @@ jobs:
 
           BUILD TYPE: TINY11 CORE (Minimal/WinSxS optimized)
           NOT FOR DAILY USE - Testing/VM only!
-          WinRE: $(if ("${{ github.event.inputs.preserve_winre }}" -eq "true") { "Preserved" } else { "Removed (stub)" })
+          WinRE: Preserved
           .NET 3.5: ${{ github.event.inputs.enable_dotnet35 }}
 
           SHA256: $sha256
@@ -485,11 +480,7 @@ jobs:
           Write-Output ""
           Write-Output "!!! THIS IS A TINY11 CORE BUILD !!!"
           Write-Output "Features removed:"
-          if ("${{ github.event.inputs.preserve_winre }}" -eq "true") {
-            Write-Output "  - Windows Recovery Environment (WinRE): PRESERVED"
-          } else {
-            Write-Output "  - Windows Recovery Environment (WinRE)"
-          }
+          # WinRE is never removed, so it does not belong in this list.
           Write-Output "  - Most WinSxS components (replaced with minimal set)"
           Write-Output "  - Windows Defender services"
           Write-Output "  - Update services (WU disabled)"
@@ -528,7 +519,7 @@ jobs:
               duration = $duration
               iso_size = $isoSize
               download_url = "https://sourceforge.net/projects/tiny-11-releases/"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               windows_build = "$env:WINDOWS_BUILD_NUMBER"
             } -Compress)
@@ -589,11 +580,7 @@ jobs:
           Write-Output "!!! IMPORTANT WARNINGS !!!"
           Write-Output ""
           Write-Output "This is a TINY11 CORE build with aggressive optimization:"
-          if ("${{ github.event.inputs.preserve_winre }}" -eq "true") {
-            Write-Output "  [+] WinRE preserved - Recovery environment intact"
-          } else {
-            Write-Output "  [-] WinRE removed - No recovery environment"
-          }
+          Write-Output "  [+] WinRE preserved - Recovery environment intact (always)"
           Write-Output "  [-] WinSxS minimized - Cannot add features/updates"
           Write-Output "  [-] Defender disabled - No built-in antivirus"
           Write-Output "  [-] Updates disabled - Manual updates only"
@@ -770,7 +757,7 @@ jobs:
             | **Index** | ${{ github.event.inputs.image_index }} |
             | **Language** | ${{ github.event.inputs.language }} |
             | **.NET 3.5** | ${{ github.event.inputs.enable_dotnet35 }} |
-            | **WinRE** | ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }} |
+            | **WinRE** | Preserved |
 
             ### 🔒 Checksums
 
@@ -785,7 +772,6 @@ jobs:
             ```
 
             ### ❌ What's Removed
-            ${{ github.event.inputs.preserve_winre != 'true' && '- **Windows Recovery Environment (WinRE)**' || '' }}
             - **Windows Component Store (WinSxS)**
             - **Windows Defender & Security Services**
             - **Windows Update Service**
@@ -797,7 +783,7 @@ jobs:
             ### ⚠️ Core Limitations
             - ❌ **NOT Serviceable** - Cannot add languages or features
             - ❌ **NO Updates** - Cannot install Cumulative Updates
-            - ${{ github.event.inputs.preserve_winre == 'true' && '✅ **Recovery intact** - WinRE preserved via -PreserveWinRE flag' || '❌ **NO Recovery** - No "Reset this PC" or Advanced Startup' }}
+            - ✅ **Recovery intact** - WinRE is always preserved
             - ❌ **NO Defender** - No real-time protection
 
             ### ✅ Features
@@ -841,7 +827,7 @@ jobs:
           - **Version:** ${{ github.event.inputs.windows_version }}
           - **Type:** Core (Minimal)
           - **.NET 3.5:** ${{ github.event.inputs.enable_dotnet35 }}
-          - **WinRE:** ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }}
+          - **WinRE:** Preserved
 
           ## 📥 Download
           ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}
@@ -856,7 +842,7 @@ jobs:
           ``````
 
           ## ⚠️ Warnings
-          - ${{ github.event.inputs.preserve_winre == 'true' && 'WinRE Preserved' || 'No WinRE (Recovery)' }}
+          - WinRE Preserved (always)
           - No WinSxS (Updates)
           - No Defender
           - Testing/VM Use Only

@@ -49,11 +49,13 @@ param (
     [string]$SCRATCH,
 
     [Parameter(Mandatory=$false, HelpMessage="Skip cleanup of temporary files")]
-    [switch]$SkipCleanup,
-
-    [Parameter(Mandatory=$false, HelpMessage="Preserve winre.wim instead of deleting it. Use this if targeting real hardware, EFI-enabled VMs (VirtualBox/VMware/Hyper-V), or 24H2/25H2 setups. Without this flag, winre.wim is deleted entirely so Windows Setup skips WinRE config gracefully. DO NOT use an empty stub — it causes error 0x8007000B on EFI systems.")]
-    [switch]$PreserveWinRE
+    [switch]$SkipCleanup
 )
+
+# WinRE is never removed. There used to be a -PreserveWinRE switch; it is gone
+# because every build that deleted winre.wim failed to install at ~10% on real
+# hardware, and the ReAgent.xml workaround did not save it. See the WinRE check
+# in the image phase.
 
 #---------[ Error Handling ]---------#
 $ErrorActionPreference = "Stop"
@@ -752,102 +754,6 @@ function Remove-EdgeAndOneDrive {
     }
 }
 
-function Remove-WinRE {
-    # Author: kelexine (https://github.com/kelexine)
-    #
-    # WHY NO STUB: Replacing winre.wim with a 0-byte empty file causes Windows
-    # Setup to hard-crash at ~75% with error 0x8007000B (ERROR_BAD_FORMAT) on
-    # EFI-enabled systems (VirtualBox, VMware, Hyper-V, real hardware with EFI).
-    #
-    # At ~75% setup invokes reagentc/DISM to configure the recovery environment.
-    # On EFI systems this step *actually parses the WIM header* — a 0-byte file
-    # is not a valid WIM, so the parser throws and setup aborts.
-    #
-    # When the file is simply ABSENT, Windows Setup gracefully skips WinRE
-    # configuration ("WinRE not found, skipping") and continues to 100%.
-    # The offline registry key WinREEnabled=0 (applied in Apply-RegistryTweaks)
-    # suppresses any post-boot attempt to re-configure or re-enable WinRE.
-    Write-Log "Removing Windows Recovery Environment (winre.wim)..."
-
-    $winRE = "$scratchDir\Windows\System32\Recovery\winre.wim"
-    if (Test-Path $winRE) {
-        Remove-Item -Path $winRE -Force -ErrorAction SilentlyContinue
-        Write-Log "winre.wim deleted. Windows Setup will skip WinRE config gracefully."
-    } else {
-        Write-Log "winre.wim not found — already absent, nothing to do." "WARN"
-    }
-
-    Write-Log "WinRE removed"
-}
-
-function Patch-ReAgentXml {
-    # Author: kelexine (https://github.com/kelexine)
-    #
-    # WHY THIS IS NEEDED
-    # ------------------
-    # ReAgent.xml (Windows\System32\Recovery\ReAgent.xml) is the offline config
-    # file that reagentc and Windows Setup read to determine WinRE state.
-    #
-    # After Remove-WinRE deletes winre.wim the XML may still contain:
-    #   <WinREStaged state="1"/>         -- tells Setup a staged WIM exists
-    #   <ImageLocation path="..."/>      -- stale path pointing to deleted file
-    #   <InstallState state="1"/>        -- marks WinRE as installed
-    #
-    # On EFI/UEFI systems Windows Setup reads this file during the Pre-Finalize
-    # phase (~75%) via WinReInstallOnTargetOS. If it sees WinREStaged=1 but
-    # can't find or mount the WIM it referenced, setup.exe aborts. If the file
-    # is absent OR consistently says state=0 everywhere, Setup skips gracefully.
-    #
-    # STRATEGY: rewrite the file with all state attributes zeroed and paths
-    # cleared. We preserve the XML schema/version so reagentc doesn't choke on
-    # a malformed file on first boot.
-    Write-Log "Patching ReAgent.xml to clear stale WinRE staging state..."
-
-    $reagentXmlPath = "$scratchDir\Windows\System32\Recovery\ReAgent.xml"
-
-    # Canonical zeroed-out ReAgent.xml — schema version matches Win11 23H2/24H2/25H2.
-    # All state attributes are 0, all path/guid/id/offset attributes are empty/zero.
-    # This is equivalent to what reagentc /disable writes on a live system.
-    $cleanXml = @'
-<?xml version='1.0' encoding='utf-8'?>
-<WindowsRE version="2.0">
-  <WinreBCD id="{00000000-0000-0000-0000-000000000000}"/>
-  <WinreLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}"/>
-  <ImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}"/>
-  <PBRImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}" index="0"/>
-  <PBRCustomImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}" index="0"/>
-  <InstallState state="0"/>
-  <OsInstallAvailable state="0"/>
-  <CustomImageAvailable state="0"/>
-  <IsAutoRepairOn state="0"/>
-  <WinREStaged state="0"/>
-  <OperationParam path=""/>
-  <OemTool path=""/>
-</WindowsRE>
-'@
-
-    # Only ever patch a ReAgent.xml that is already there. Creating the file (and
-    # its parent directory) inside boot.wim adds entries the stock image does not
-    # have, which is a gratuitous deviation from Microsoft's boot media - and the
-    # boot media is precisely what third-party boot managers such as Ventoy
-    # inspect and patch.
-    if (-not (Test-Path -LiteralPath $reagentXmlPath)) {
-        Write-Log "No ReAgent.xml at $reagentXmlPath - nothing to patch"
-        return
-    }
-
-    try {
-        # Write as UTF-8 without BOM — reagentc expects plain UTF-8
-        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($reagentXmlPath, $cleanXml.TrimStart(), $utf8NoBom)
-
-        Write-Log "ReAgent.xml patched: all WinRE state/staging fields zeroed."
-    } catch {
-        Write-Log "Failed to patch ReAgent.xml: $_" "WARN"
-        Write-Log "Setup may still skip WinRE gracefully due to missing winre.wim, but patching is preferred." "WARN"
-    }
-}
-
 function Optimize-WinSxS {
     Write-Log "Optimizing WinSxS folder..."
 
@@ -1121,11 +1027,11 @@ function Apply-RegistryTweaks {
         Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$path" "Start" "REG_DWORD" "4"
     }
 
-    # Disable WinRE — prevents reagentc from trying to reconfigure the recovery
-    # environment on first boot after winre.wim has been removed. Without this,
-    # Windows may attempt to recreate a WinRE partition and fail silently (or
-    # trigger error dialogs). WinREEnabled=0 tells reagentc the feature is
-    # intentionally absent. (Companion to the Remove-WinRE build-time deletion.)
+    # WinREEnabled=0 tells reagentc not to reconfigure the recovery environment on
+    # first boot. winre.wim itself is still present in the image (see the WinRE check
+    # in the image phase) - this only stops reagentc from rewriting the recovery
+    # partition and failing silently, or raising an error dialog, on a machine whose
+    # partition layout the user controls.
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
 
     # Hide both Settings pages. Page ids are the ms-settings URI minus the
@@ -1350,12 +1256,9 @@ function Process-BootImage {
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' 'PreventDeviceEncryption' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Setup\Recovery' 'DisableRecovery' 'REG_DWORD' '1'
 
-    # If winre.wim was removed from the OS image, patch ReAgent.xml in boot.wim as well
-    # so SetupHost does not attempt to stage SafeOS from Install.esd during WinPE setup (bypasses error 0x80070003 at 11%)
-    if (-not $PreserveWinRE) {
-        Write-Log "Patching ReAgent.xml in boot.wim to suppress WinRE SafeOS extraction..."
-        Patch-ReAgentXml
-    }
+    # ReAgent.xml is deliberately left as Microsoft ships it, in the OS image and in
+    # boot.wim. winre.wim is never deleted, so the configuration that names it stays
+    # valid and Setup stages SafeOS from the file it finds.
 
     # Unload registry
     reg unload HKLM\zNTUSER 2>&1 | Out-Null
@@ -1565,13 +1468,14 @@ try {
     Clean-InputMethods
     Remove-MiscellaneousFiles
     Remove-EdgeAndOneDrive
-    if ($PreserveWinRE) {
-        Write-Log "Skipping WinRE removal (PreserveWinRE flag set)" "INFO"
-        Write-Log "ReAgent.xml will NOT be patched — original WinRE state preserved." "INFO"
-    } else {
-        Remove-WinRE
-        Patch-ReAgentXml
+
+    # WinRE is always kept - no switch, no removal code. Deleting winre.wim left
+    # SetupHost with nothing to stage SafeOS from, and the install died at ~10%.
+    $winreCheck = "$scratchDir\Windows\System32\Recovery\winre.wim"
+    if (-not (Test-Path -LiteralPath $winreCheck)) {
+        throw "winre.wim is missing from the mounted image ($winreCheck) before export. Refusing to build an ISO that cannot install - every WinRE-less build has failed at ~10%."
     }
+    Write-Log "WinRE preserved: $([math]::Round((Get-Item -LiteralPath $winreCheck).Length / 1MB, 1))MB stays in the image" "INFO"
 
     # Registry phase
     Load-RegistryHives

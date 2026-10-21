@@ -90,7 +90,7 @@
 
 .EXAMPLE
     # Full Core-Gaming build for competitive esports
-    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender -PreserveWinRE
+    .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile -RemoveDefender
 
 .EXAMPLE
     # Core-Gaming with a few groups dialled back
@@ -128,8 +128,9 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Enable .NET Framework 3.5")]
     [switch]$ENABLE_DOTNET35,
 
-    [Parameter(Mandatory=$false, HelpMessage="Keep winre.wim in the image. Without this, winre.wim is deleted and ReAgent.xml is zeroed so Setup skips WinRE staging entirely. Preserving it is the safer choice for real hardware and for 24H2/25H2/26H2 media; removing it saves roughly 500MB but any path that expects a working recovery environment will fail.")]
-    [switch]$PreserveWinRE,
+    # There is deliberately no WinRE switch. winre.wim is always kept: every build
+    # that removed it failed to install at ~10% on real hardware, and no amount of
+    # ReAgent.xml patching fixed that. See Assert-InstallImageRecoveryConsistent.
 
     [Parameter(Mandatory=$false, HelpMessage="Completely remove Windows Defender / Security so no antimalware service is present in the finished image. Off by default - the standard Core build only disables the Defender services. A Core-Gaming build always does this, so the switch is redundant there.")]
     [switch]$RemoveDefender,
@@ -912,114 +913,6 @@ function Remove-EdgeAndOneDrive {
     }
 }
 
-# The one ReAgent.xml this build ships whenever winre.wim is not preserved.
-#
-# Every WinRE location and staging field is zeroed. SetupHost reads this file out
-# of the install image while it is applying it, and stages SafeOS from whatever
-# ImageLocation points at. Ship a ReAgent.xml that still references a winre.wim
-# we deleted and SetupHost tries to stage a file that is not on the media: the
-# install dies at ~11% with 0x80070003 (ERROR_PATH_NOT_FOUND), which surfaces to
-# the user as "installation failed after 10%".
-$script:ReAgentXmlPatched = $false
-
-$script:CleanReAgentXml = @'
-<?xml version='1.0' encoding='utf-8'?>
-<WindowsRE version="2.0">
-  <WinreBCD id="{00000000-0000-0000-0000-000000000000}"/>
-  <WinreLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}"/>
-  <ImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}"/>
-  <PBRImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}" index="0"/>
-  <PBRCustomImageLocation path="" id="0" offset="0" guid="{00000000-0000-0000-0000-000000000000}" index="0"/>
-  <InstallState state="0"/>
-  <OsInstallAvailable state="0"/>
-  <CustomImageAvailable state="0"/>
-  <IsAutoRepairOn state="0"/>
-  <WinREStaged state="0"/>
-  <OperationParam path=""/>
-  <OemTool path=""/>
-</WindowsRE>
-'@
-
-function Write-CleanReAgentXml {
-    # Overwrites ReAgent.xml in the given mounted-image Recovery directory with the
-    # zeroed stub above, and reports the outcome through $script:ReAgentXmlPatched.
-    #
-    # It deliberately returns nothing: Write-Log writes to the output stream, so a
-    # `return $true` here would hand the caller [logstring, bool] and any `-not` on
-    # that result reads the non-empty array, not the boolean.
-    #
-    # -CreateIfMissing is for the OS image only: there we WANT the file to exist and
-    # say "nothing is staged", so the invariant is always "winre.wim present, or
-    # ReAgent.xml stubbed". Creating it inside boot.wim is a different matter - see
-    # Patch-ReAgentXml.
-    param(
-        [Parameter(Mandatory = $true)][string]$RecoveryDir,
-        [switch]$CreateIfMissing
-    )
-
-    $script:ReAgentXmlPatched = $false
-    $reagentXmlPath = Join-Path $RecoveryDir 'ReAgent.xml'
-
-    if (-not (Test-Path -LiteralPath $reagentXmlPath) -and -not $CreateIfMissing) {
-        Write-Log "No ReAgent.xml at $reagentXmlPath - nothing to patch"
-        return
-    }
-
-    try {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-        [System.IO.File]::WriteAllText($reagentXmlPath, $script:CleanReAgentXml.TrimStart(), $utf8NoBom)
-        Write-Log "ReAgent.xml zeroed: no WinRE location or staging state remains ($reagentXmlPath)"
-        $script:ReAgentXmlPatched = $true
-    } catch {
-        Write-Log "Failed to patch ReAgent.xml at $reagentXmlPath : $_" "WARN"
-    }
-}
-
-function Remove-WinRE {
-    Write-Log "Removing Windows Recovery Environment (winre.wim)..."
-
-    $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-    & takeown /f $recoveryDir /r /a 2>&1 | Out-Null
-    & icacls $recoveryDir /grant "$($adminGroup.Value):(F)" /T /C 2>&1 | Out-Null
-
-    $winRE = "$recoveryDir\winre.wim"
-    if (Test-Path $winRE) {
-        Remove-Item -Path $winRE -Force -ErrorAction SilentlyContinue
-        Write-Log "winre.wim deleted."
-    } else {
-        Write-Log "winre.wim not found — already absent, nothing to do." "WARN"
-    }
-
-    # Deleting winre.wim is only half the job. ReAgent.xml still names the image we
-    # just removed, and SetupHost acts on that file while applying the image - so it
-    # must be zeroed here, in the OS image, before install.wim is committed. Patching
-    # boot.wim's copy later (Process-BootImage) cannot fix this: boot.wim is WinPE's
-    # own recovery config, not the one Setup copies into the target.
-    Write-CleanReAgentXml -RecoveryDir $recoveryDir -CreateIfMissing
-    if (-not $script:ReAgentXmlPatched) {
-        Write-Log "WARNING: install image still references a removed winre.wim - Windows Setup will likely fail at ~11% with 0x80070003" "WARN"
-    }
-
-    Write-Log "WinRE removed"
-}
-
-function Patch-ReAgentXml {
-    Write-Log "Patching ReAgent.xml to clear stale WinRE staging state..."
-
-    $recoveryDir = "$scratchDir\Windows\System32\Recovery"
-
-    # Only ever patch a ReAgent.xml that is already there. Creating the file (and
-    # its parent directory) inside boot.wim adds entries the stock image does not
-    # have, which is a gratuitous deviation from Microsoft's boot media - and the
-    # boot media is precisely what third-party boot managers such as Ventoy
-    # inspect and patch. The registry values set alongside this
-    # (SkipInstallingWinRE / DisableRecovery / WinREEnabled) already suppress WinRE.
-    #
-    # The OS image is a different story and is handled by Remove-WinRE, which does
-    # create the stub when it deletes winre.wim.
-    Write-CleanReAgentXml -RecoveryDir $recoveryDir
-}
-
 function Remove-TreeForcefully {
     # Deletes a directory tree that Windows has made hostile to a plain
     # `Remove-Item -Recurse -Force`. Returns $true once the path is gone.
@@ -1456,8 +1349,9 @@ function Apply-RegistryTweaks {
         }
     }
 
-    # Disable WinRE — prevents reagentc from trying to reconfigure the recovery
-    # environment on first boot after winre.wim has been removed.
+    # WinREEnabled=0 stops reagentc from reconfiguring the recovery environment on
+    # first boot. winre.wim itself is still in the image - this only keeps reagentc
+    # from rewriting the recovery partition on hardware whose layout the user owns.
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
 
     # Hide both Settings pages. This is the ONLY write site for
@@ -1714,12 +1608,9 @@ function Process-BootImage {
     #
     # The stock media launches Setup on its own, so nothing here needs to set it.
 
-    # If winre.wim was removed from the OS image, patch ReAgent.xml in boot.wim as well
-    # so SetupHost does not attempt to stage SafeOS from Install.esd during WinPE setup (bypasses error 0x80070003 at 11%)
-    if (-not $PreserveWinRE) {
-        Write-Log "Patching ReAgent.xml in boot.wim to suppress WinRE SafeOS extraction..."
-        Patch-ReAgentXml
-    }
+    # ReAgent.xml is deliberately left exactly as Microsoft ships it, in both the OS
+    # image and boot.wim. winre.wim is never deleted, so the recovery configuration
+    # that names it stays valid and Setup stages SafeOS from the file it finds.
 
     # Unload registry
     reg unload HKLM\zCOMPONENTS | Out-Null
@@ -1753,14 +1644,18 @@ function Convert-ToESD {
 }
 
 function Assert-InstallImageRecoveryConsistent {
-    # Fails the build unless the exported install image can survive Windows Setup's
-    # WinRE staging pass.
+    # Fails the build unless the exported install image still carries a usable
+    # winre.wim.
     #
-    # SetupHost reads <image>\Windows\System32\Recovery\ReAgent.xml while it applies
-    # the image. If that file still names a winre.wim this build deleted, Setup dies
-    # at ~11% with 0x80070003 - after the user has already waited through the
-    # download, the USB write and 10% of the install. Checking costs a couple of
-    # minutes; not checking costs a 2.8GB ISO that cannot install.
+    # SetupHost stages SafeOS out of the image it is applying. A build that ships no
+    # winre.wim gives it nothing to stage, and the install dies at ~10-11% - after
+    # the user has already waited through the download, the USB write and 10% of the
+    # install. Zeroing ReAgent.xml was tried as a workaround and did not fix it on
+    # real hardware, so the only invariant this build enforces is the blunt one:
+    # winre.wim must be present and must not be truncated.
+    #
+    # Checking costs a couple of minutes; not checking costs a 2.8GB ISO that cannot
+    # install.
     param([Parameter(Mandatory = $true)][string]$ImagePath)
 
     $verifyDir = Join-Path $ScratchDisk 'tiny11-verify'
@@ -1787,30 +1682,26 @@ function Assert-InstallImageRecoveryConsistent {
         $winrePath = Join-Path $recoveryDir 'winre.wim'
         $reagentPath = Join-Path $recoveryDir 'ReAgent.xml'
 
-        $hasWinre = Test-Path -LiteralPath $winrePath
-        $hasReagent = Test-Path -LiteralPath $reagentPath
-
-        if (-not $hasWinre) {
-            if (-not $hasReagent) {
-                throw "install image has neither winre.wim nor ReAgent.xml. SetupHost cannot decide whether to stage WinRE and aborts around 11% (0x80070003)."
-            }
-
-            $reagentText = Get-Content -LiteralPath $reagentPath -Raw
-            if ($reagentText -match '<WinREStaged\s+state="1"') {
-                throw "ReAgent.xml still reports WinREStaged state=1 but winre.wim was removed. Windows Setup will fail at ~11% with 0x80070003."
-            }
-            if ($reagentText -match '<ImageLocation[^>]*\spath="[^"]+"') {
-                throw "ReAgent.xml still points ImageLocation at a winre.wim that is not in the image. Windows Setup will fail at ~11% with 0x80070003."
-            }
-
-            Write-Log "WinRE check passed: winre.wim removed and ReAgent.xml zeroed" "SUCCESS"
-        } else {
-            $winreMB = [math]::Round((Get-Item -LiteralPath $winrePath).Length / 1MB, 1)
-            if ($winreMB -lt 100) {
-                throw "winre.wim is only ${winreMB}MB - it looks truncated. Setup would fail staging SafeOS."
-            }
-            Write-Log "WinRE check passed: preserved (${winreMB}MB)" "SUCCESS"
+        if (-not (Test-Path -LiteralPath $winrePath)) {
+            throw "install image has no winre.wim ($winrePath). SetupHost has nothing to stage SafeOS from and the install dies at ~10% - refusing to publish this ISO."
         }
+
+        $winreMB = [math]::Round((Get-Item -LiteralPath $winrePath).Length / 1MB, 1)
+        if ($winreMB -lt 100) {
+            throw "winre.wim is only ${winreMB}MB - it looks truncated. Setup would fail staging SafeOS, so refusing to publish this ISO."
+        }
+
+        # A zeroed ReAgent.xml next to a present winre.wim means a stale stub from an
+        # older build path survived into the image. It does not break Setup (it simply
+        # skips staging), but it silently costs the user "Reset this PC", so say so.
+        if (Test-Path -LiteralPath $reagentPath) {
+            $reagentText = Get-Content -LiteralPath $reagentPath -Raw
+            if ($reagentText -match '<ImageLocation[^>]*\spath=""') {
+                Write-Log "ReAgent.xml is the zeroed stub while winre.wim is present - recovery will not be registered on first boot" "WARN"
+            }
+        }
+
+        Write-Log "WinRE check passed: winre.wim present (${winreMB}MB)" "SUCCESS"
     }
     finally {
         if ($mounted) {
@@ -1868,22 +1759,12 @@ function Create-TinyISO {
         Write-Log "Boot file verified: $bootFile"
     }
 
-    # Prove the image Setup is about to apply will survive its WinRE staging pass.
-    # This is the check that stops an un-installable ISO from being published.
-    #
-    # Only WIMs can be mounted. The Core flow runs Convert-ToESD before this point,
-    # so install.wim is already gone and install.esd is what is left - and DISM
-    # mounts .ffu/.wim/.vhd/.vhdx only, never a solid-compressed ESD. The same image
-    # was verified as a WIM in the main flow (see the Assert call after
-    # Dismount-AndExport), so skipping the ESD here costs no coverage; attempting to
-    # mount it would fail every build with a misleading "the image is corrupt".
-    foreach ($img in $installImages) {
-        if ([System.IO.Path]::GetExtension($img) -ne '.wim') {
-            Write-Log "Recovery check skipped for $([System.IO.Path]::GetFileName($img)): DISM cannot mount a solid ESD. This image was verified as a WIM before the ESD export."
-            continue
-        }
-        Assert-InstallImageRecoveryConsistent -ImagePath $img
-    }
+    # The recovery check does not run here. Convert-ToESD has already deleted
+    # install.wim by this point, and DISM mounts .ffu/.wim/.vhd/.vhdx only - never a
+    # solid-compressed ESD. The same image was verified while it was still a WIM, in
+    # the main flow right after Dismount-AndExport and before Convert-ToESD, so
+    # re-checking the ESD would add nothing and would fail every build with a
+    # misleading "the image is corrupt".
 
     # Determine oscdimg.exe location
     $hostArchitecture = $Env:PROCESSOR_ARCHITECTURE
@@ -2074,11 +1955,16 @@ try {
     }
 
     Remove-EdgeAndOneDrive
-    if ($PreserveWinRE) {
-        Write-Log "Skipping WinRE removal (PreserveWinRE flag set)" "INFO"
-    } else {
-        Remove-WinRE
+
+    # WinRE is always kept. Removing it was the cause of installs dying at ~10%:
+    # SetupHost stages SafeOS out of the image it is applying, and a build with no
+    # winre.wim has nothing to stage. This is not configurable any more - there is no
+    # switch, no workflow input, and no removal code left in this script.
+    $winreCheck = "$scratchDir\Windows\System32\Recovery\winre.wim"
+    if (-not (Test-Path -LiteralPath $winreCheck)) {
+        throw "winre.wim is missing from the mounted image ($winreCheck) before export. Refusing to build an ISO that cannot install - every WinRE-less build has failed at ~10%."
     }
+    Write-Log "WinRE preserved: $([math]::Round((Get-Item -LiteralPath $winreCheck).Length / 1MB, 1))MB stays in the image" "INFO"
 
     Load-RegistryHives
     Apply-RegistryTweaks

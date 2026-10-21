@@ -39,11 +39,6 @@ on:
         required: false
         default: false
         type: boolean
-      preserve_winre:
-        description: 'Preserve winre.wim (required for real hardware / 24H2+ installs to avoid 0x8007000B)'
-        type: boolean
-        required: false
-        default: false
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -116,7 +111,7 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Nano"
               edition = "$env:EDITION_NAME"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
             } -Compress)
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_BUILDS }}
@@ -314,12 +309,12 @@ jobs:
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Output "!!! EXTREME NANO BUILD - VM TESTING ONLY!"
 
-          $preserveWinRE = [System.Boolean]::Parse("${{ github.event.inputs.preserve_winre }}")
-          Write-Output "Preserve WinRE: $preserveWinRE"
+          # WinRE is always preserved - the builder has no switch for it any more.
+          Write-Output "Preserve WinRE: always (the builder no longer has a toggle)"
 
           $startTime = Get-Date
 
-          .\scripts\nano11builder-headless.ps1 @params -PreserveWinRE:$preserveWinRE
+          .\scripts\nano11builder-headless.ps1 @params
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Nano build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
@@ -410,13 +405,12 @@ jobs:
           Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           BUILD TYPE: NANO11 (EXTREME MINIMAL - Testing Only!)
-          WinRE: $(if ("${{ github.event.inputs.preserve_winre }}" -eq "true") { "Preserved" } else { "Removed (stub)" })
+          WinRE: Preserved
 
           SHA256: $sha256
           MD5: $md5
 
           Removed Components:
-            $(if ("${{ github.event.inputs.preserve_winre }}" -ne "true") { "- Windows Recovery Environment (WinRE)" })
             - Drivers (printer, scanner, tape, MFD)
             - Fonts (most non-essential)
             - .NET Native Images
@@ -465,7 +459,7 @@ jobs:
               duration = $duration
               iso_size = $isoSize
               download_url = "https://sourceforge.net/projects/tiny-11-releases/"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
               windows_build = "$env:WINDOWS_BUILD_NUMBER"
             } -Compress)
         env:
@@ -647,7 +641,7 @@ jobs:
             | **Base** | Windows 11 ${{ github.event.inputs.windows_version }} |
             | **Index** | ${{ github.event.inputs.image_index }} |
             | **Language** | ${{ github.event.inputs.language }} |
-            | **WinRE** | ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }} |
+            | **WinRE** | Preserved |
 
             ### 🔒 Checksums
 
@@ -662,7 +656,6 @@ jobs:
             ```
 
             ### 💣 What's Removed (Beyond Core)
-            ${{ github.event.inputs.preserve_winre != 'true' && '- **Windows Recovery Environment (WinRE)**' || '' }}
             - **Driver packages** (printer, scanner, MFD, tape)
             - **Fonts** (keeping only Segoe, Arial, Calibri, Times)
             - **.NET Native Images** (pre-compiled assemblies)
@@ -677,7 +670,7 @@ jobs:
             - ❌ **NO Photos app** - Use file explorer only
             - ❌ **NO CJK Input** - Chinese/Japanese/Korean removed
             - ❌ **MINIMAL fonts** - Only essential Western fonts
-            - ${{ github.event.inputs.preserve_winre == 'true' && '✅ **Recovery intact** - WinRE preserved via -PreserveWinRE flag' || '❌ **NO Recovery** - No "Reset this PC" or Advanced Startup' }}
+            - ✅ **Recovery intact** - WinRE is always preserved
             - ❌ All Core limitations apply
 
             ### ✅ Use Cases
@@ -711,7 +704,7 @@ jobs:
           - **Release:** ${{ env.RELEASE_TAG }}
           - **Version:** ${{ github.event.inputs.windows_version }}
           - **Type:** Nano (EXTREME Minimal)
-          - **WinRE:** ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }}
+          - **WinRE:** Preserved
 
           ## 📥 Download
           ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}

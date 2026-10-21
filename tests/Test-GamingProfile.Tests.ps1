@@ -465,9 +465,11 @@ Describe 'Core-Gaming workflow' {
     }
 
     It 'preserves every input from the Core workflow' {
+        # preserve_winre is deliberately absent: WinRE is always kept, so there is no
+        # toggle to mirror. See Test-WinRERecovery.Tests.ps1.
         foreach ($input in @(
             'windows_version', 'windows_iso_url', 'windows_build', 'image_index',
-            'language', 'skip_cleanup', 'enable_dotnet35', 'preserve_winre',
+            'language', 'skip_cleanup', 'enable_dotnet35',
             'remove_defender', 'account_setup'
         )) {
             $workflowRaw | Should -Match "(?m)^\s{6}$([regex]::Escape($input)):"

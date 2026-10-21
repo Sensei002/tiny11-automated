@@ -94,11 +94,6 @@ on:
         type: boolean
         required: false
         default: false
-      preserve_winre:
-        description: 'Keep winre.wim and the recovery environment. ON by default: removing it is the documented cause of installs dying at ~10-11% with 0x80070003 on real hardware. Turn OFF only to save ~500MB on a build you will not need recovery on.'
-        type: boolean
-        required: false
-        default: true
       remove_defender:
         description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender and the whole Windows Update stack.'
         type: boolean
@@ -357,7 +352,7 @@ jobs:
               version = "${{ inputs.windows_version }}"
               build_type = "Core-Gaming"
               edition = "$env:EDITION_NAME"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               gaming_profile = "core-gaming"
               hags_mode = "${{ inputs.hags }}"
@@ -635,7 +630,7 @@ jobs:
           }
 
           $enableDotNet = [System.Boolean]::Parse("${{ github.event.inputs.enable_dotnet35 }}")
-          $preserveWinRE = [System.Boolean]::Parse("${{ github.event.inputs.preserve_winre }}")
+          # WinRE is always preserved - the builder has no switch for it any more.
           $removeDefender = ("${{ github.event.inputs.remove_defender }}" -eq "true")
 
           $accountSetup = "${{ github.event.inputs.account_setup }}"
@@ -667,7 +662,7 @@ jobs:
           Write-Output "ISO Drive: $($params.ISO)"
           Write-Output "Image Index: $($params.INDEX)"
           Write-Output ".NET 3.5: $enableDotNet"
-          Write-Output "Preserve WinRE: $preserveWinRE"
+          Write-Output "Preserve WinRE: always (the builder no longer has a toggle)"
           Write-Output "Remove Defender: $removeDefender"
           Write-Output "Account setup: $accountSetup"
           Write-Output "HAGS: $hagsMode"
@@ -682,7 +677,6 @@ jobs:
 
           .\scripts\tiny11coremaker-headless.ps1 @params `
             -ENABLE_DOTNET35:$enableDotNet `
-            -PreserveWinRE:$preserveWinRE `
             -RemoveDefender:$removeDefender `
             -AccountSetup $accountSetup `
             -GamingProfile `
@@ -794,7 +788,7 @@ jobs:
           Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
           BUILD TYPE: TINY11 CORE-GAMING (latency-first, AtlasOS-style)
-          WinRE: $(if ("${{ github.event.inputs.preserve_winre }}" -eq "true") { "Preserved" } else { "Removed (stub)" })
+          WinRE: Preserved
           .NET 3.5: ${{ github.event.inputs.enable_dotnet35 }}
           HAGS: ${{ github.event.inputs.hags }}
 
@@ -854,7 +848,7 @@ jobs:
               duration = $duration
               iso_size = $isoSize
               download_url = "https://sourceforge.net/projects/tiny-11-releases/"
-              preserve_winre = "${{ inputs.preserve_winre }}"
+              preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               gaming_profile = "core-gaming"
               hags_mode = "${{ inputs.hags }}"
@@ -1052,7 +1046,7 @@ jobs:
             | **Base** | Windows 11 ${{ github.event.inputs.windows_version }} |
             | **Index** | ${{ github.event.inputs.image_index }} |
             | **HAGS** | ${{ github.event.inputs.hags }} |
-            | **WinRE** | ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }} |
+            | **WinRE** | Preserved |
 
             ### ⚡ Applied in this build
             | Group | State |
@@ -1083,7 +1077,6 @@ jobs:
             - `C:\Windows\Tiny11Gaming\GAMING_PROFILE.md` — the exact list of what was changed
 
             ### ❌ What's Removed
-            ${{ github.event.inputs.preserve_winre != 'true' && '- **Windows Recovery Environment (WinRE)**' || '' }}
             - **Windows Component Store (WinSxS)**
             - **Windows Update Service**
             - **Xbox / Gaming Services** (breaks Game Pass and Microsoft Store games)
@@ -1127,7 +1120,7 @@ jobs:
           - **Version:** ${{ github.event.inputs.windows_version }}
           - **Type:** Core-Gaming (latency-first, AtlasOS-style)
           - **HAGS:** ${{ github.event.inputs.hags }}
-          - **WinRE:** ${{ github.event.inputs.preserve_winre == 'true' && 'Preserved' || 'Removed (stub)' }}
+          - **WinRE:** Preserved
 
           ## 📥 Download
           ${{ secrets.SF_SSH_KEY != '' && format('🔗 **SourceForge:** [{0}]({1})', env.ISO_NAME, env.SF_DOWNLOAD_URL) || '🔗 **GitHub Artifacts:** Available in workflow run' }}
