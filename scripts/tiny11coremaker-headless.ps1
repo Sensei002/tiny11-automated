@@ -931,22 +931,34 @@ function Remove-TreeForcefully {
     #     takeown+icacls pass earlier in Optimize-WinSxS did not save the delete.
     #   * Files still held by the servicing stack need a retry.
     #
-    # So: operate on a \\?\ extended-length path, take ownership using the
-    # locale-independent Administrators SID, clear the attributes, then delete
-    # through several mechanisms with backoff.
+    # CONTRACT: this function never throws. It runs 20+ minutes into a build, and
+    # Optimize-WinSxS has a documented fallback for "could not delete" - a fallback
+    # that is worthless if an exception escapes instead of a $false.
+    #
+    # That is not hypothetical. Get-ChildItem -Recurse over a WinSxS tree that the
+    # preceding Remove-Item already half-deleted raises ERROR_DEVICE_DOES_NOT_EXIST
+    # ("A device which does not exist was specified") as a *terminating* .NET
+    # exception - neither -ErrorAction SilentlyContinue nor $ErrorActionPreference
+    # suppresses those - and it took the whole build down as a FATAL error.
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [int]$MaxAttempts = 3
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    # Every existence check is wrapped: Test-Path on a path whose volume or
+    # reparse target has vanished throws as readily as the delete does.
+    $isGone = {
+        try { -not (Test-Path -LiteralPath $Path) } catch { $true }
+    }
+
+    if (& $isGone) { return $true }
 
     $long     = if ($Path.StartsWith('\\?\')) { $Path } else { "\\?\$Path" }
     $adminSid = '*S-1-5-32-544'   # BUILTIN\Administrators, locale independent
 
     # Cheap attempt first - this is all a healthy tree ever needs.
     try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop } catch { }
-    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+    if (& $isGone) { return $true }
 
     # Every native tool below reports trouble on stderr. Under the script-level
     # $ErrorActionPreference = 'Stop', PowerShell 5.1 promotes redirected native
@@ -954,34 +966,84 @@ function Remove-TreeForcefully {
     # letting the next strategy try. Scope it down for the duration.
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+
+    # robocopy mirrors an empty directory onto the target: it walks the tree with
+    # its own engine, copes with long paths, reparse points and attributes, and
+    # reports trouble through $LASTEXITCODE instead of throwing. It is the only
+    # strategy here that survives a tree the PowerShell provider cannot enumerate.
+    $empty = Join-Path ([System.IO.Path]::GetTempPath()) ("tiny11-empty-" + [guid]::NewGuid().ToString('N'))
+
     try {
+        try { New-Item -ItemType Directory -Path $empty -Force -ErrorAction SilentlyContinue | Out-Null } catch { }
+
         for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
             Write-Log "Force-deleting tree (attempt $attempt/$MaxAttempts): $Path" "WARN"
 
-            & takeown.exe /F $long /R /A /D Y 2>&1 | Out-Null
-            & icacls.exe  $long /grant "${adminSid}:(F)" /T /C /Q 2>&1 | Out-Null
+            try { & takeown.exe /F $long /R /A /D Y 2>&1 | Out-Null } catch { }
+            try { & icacls.exe  $long /grant "${adminSid}:(F)" /T /C /Q 2>&1 | Out-Null } catch { }
 
             # attrib.exe handles the bulk quickly; the .NET pass afterwards
             # covers whatever attrib could not reach (it cannot take a \\?\).
-            & cmd.exe /c "attrib -R -S -H `"$long\*`" /S /D" 2>&1 | Out-Null
-            Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
-                ForEach-Object { try { $_.Attributes = [System.IO.FileAttributes]::Normal } catch { } }
+            try { & cmd.exe /c "attrib -R -S -H `"$long\*`" /S /D" 2>&1 | Out-Null } catch { }
+
+            # Wrapped as a whole: it is the *enumeration* that throws when entries
+            # disappear mid-walk, not just the attribute assignment.
+            try {
+                Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+                    ForEach-Object { try { $_.Attributes = [System.IO.FileAttributes]::Normal } catch { } }
+            } catch { }
 
             try { Remove-Item -LiteralPath $long -Recurse -Force -ErrorAction Stop } catch { }
-            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+            if (& $isGone) { return $true }
+
+            if (Test-Path -LiteralPath $empty) {
+                try { & robocopy.exe $empty $long /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS /NP 2>&1 | Out-Null } catch { }
+            }
+            if (& $isGone) { return $true }
 
             # cmd's rd walks the tree through a different code path and copes
             # with some leftovers the .NET provider will not.
-            & cmd.exe /c "rd /s /q `"$long`"" 2>&1 | Out-Null
-            if (-not (Test-Path -LiteralPath $Path)) { return $true }
+            try { & cmd.exe /c "rd /s /q `"$long`"" 2>&1 | Out-Null } catch { }
+            if (& $isGone) { return $true }
 
             if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds (5 * $attempt) }
         }
+    } catch {
+        # Last line of defence. Nothing past this point may turn "could not delete
+        # a directory" into "the build died".
+        Write-Log "Force-delete hit an unexpected error, leaving the tree in place: $_" "WARN"
     } finally {
         $ErrorActionPreference = $previousEap
+        try {
+            if (Test-Path -LiteralPath $empty) {
+                Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
     }
 
-    return (-not (Test-Path -LiteralPath $Path))
+    return (& $isGone)
+}
+
+function Test-TreeRemoved {
+    # Removes a tree and reports the outcome as a clean boolean.
+    #
+    # ALWAYS call this rather than Remove-TreeForcefully. Write-Log writes to the
+    # success stream, so `if (Remove-TreeForcefully -Path $p)` does not test the
+    # boolean - it tests the array of log lines the function emitted, and a
+    # non-empty array is always true in PowerShell. That made the graceful
+    # "could not delete - keep the original WinSxS and carry on" fallback in
+    # Optimize-WinSxS unreachable: a failed delete reported success, and the
+    # Rename-Item that followed threw "Cannot create a file when that file already
+    # exists". Same hazard as the one documented on the ReAgent writer, which is
+    # why the result is funnelled through one place instead of trusted per caller.
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$MaxAttempts = 3
+    )
+
+    $result = @(Remove-TreeForcefully -Path $Path -MaxAttempts $MaxAttempts)
+    if ($result.Count -eq 0) { return $false }
+    return ($result[-1] -eq $true)
 }
 
 function Optimize-WinSxS {
@@ -1084,7 +1146,7 @@ function Optimize-WinSxS {
     }
 
     Write-Log "Replacing WinSxS with minimal version..."
-    if (Remove-TreeForcefully -Path $sourceDirectory) {
+    if (Test-TreeRemoved -Path $sourceDirectory) {
         Rename-Item -Path $destinationDirectory -NewName "WinSxS"
         Write-Log "WinSxS optimization complete"
     } else {
@@ -1093,7 +1155,7 @@ function Optimize-WinSxS {
         # image - just a much larger one. Warned loudly so it can never be
         # mistaken for a normal Core build.
         Write-Log "Could not remove the original WinSxS tree - SKIPPING WinSxS optimization. The resulting ISO will be much larger than a normal Core build." "WARN"
-        if (-not (Remove-TreeForcefully -Path $destinationDirectory)) {
+        if (-not (Test-TreeRemoved -Path $destinationDirectory)) {
             Write-Log "Could not remove the WinSxS_edit staging tree either; the ISO will be larger still." "WARN"
         }
     }
