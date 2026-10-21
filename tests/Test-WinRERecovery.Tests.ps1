@@ -116,6 +116,33 @@ Describe 'WinRE removal leaves a consistent image' {
         $body = Get-FunctionBody -Source $builderSource -Name 'Create-TinyISO'
         $body | Should -Match 'Assert-InstallImageRecoveryConsistent'
     }
+
+    It 'inspects the image as a WIM, before the ESD conversion deletes it' {
+        # DISM mounts .ffu/.wim/.vhd/.vhdx only - a solid ESD cannot be mounted. The
+        # Core flow deletes install.wim in Convert-ToESD, so a guard that only ran from
+        # Create-TinyISO would be handed install.esd, fail to mount it, and abort every
+        # build with a misleading "the image is corrupt". The check therefore has to
+        # happen while the exported image is still a WIM.
+        #
+        # LastIndexOf on purpose: these names each appear twice, once as the function
+        # definition and once as the call in the main flow at the end of the script.
+        $dismountCall = $builderSource.LastIndexOf('Dismount-AndExport')
+        $assertCall = $builderSource.LastIndexOf('Assert-InstallImageRecoveryConsistent -ImagePath $wimFilePath')
+        $esdCall = $builderSource.LastIndexOf('Convert-ToESD')
+
+        $dismountCall | Should -BeGreaterThan -1
+        $assertCall | Should -BeGreaterThan $dismountCall
+        $esdCall | Should -BeGreaterThan $assertCall
+    }
+
+    It 'never tries to mount the ESD from Create-TinyISO' {
+        # GetExtension, not a bare '.wim' match: the size-check loop earlier in the
+        # same function already mentions install.wim, so matching the literal would
+        # pass even if the skip logic were deleted.
+        $body = Get-FunctionBody -Source $builderSource -Name 'Create-TinyISO'
+        $body | Should -Match 'GetExtension'
+        $body | Should -Match 'continue'
+    }
 }
 
 Describe 'Workflow defaults do not ship an un-installable image' {

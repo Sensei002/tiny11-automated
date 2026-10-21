@@ -1870,7 +1870,18 @@ function Create-TinyISO {
 
     # Prove the image Setup is about to apply will survive its WinRE staging pass.
     # This is the check that stops an un-installable ISO from being published.
+    #
+    # Only WIMs can be mounted. The Core flow runs Convert-ToESD before this point,
+    # so install.wim is already gone and install.esd is what is left - and DISM
+    # mounts .ffu/.wim/.vhd/.vhdx only, never a solid-compressed ESD. The same image
+    # was verified as a WIM in the main flow (see the Assert call after
+    # Dismount-AndExport), so skipping the ESD here costs no coverage; attempting to
+    # mount it would fail every build with a misleading "the image is corrupt".
     foreach ($img in $installImages) {
+        if ([System.IO.Path]::GetExtension($img) -ne '.wim') {
+            Write-Log "Recovery check skipped for $([System.IO.Path]::GetFileName($img)): DISM cannot mount a solid ESD. This image was verified as a WIM before the ESD export."
+            continue
+        }
         Assert-InstallImageRecoveryConsistent -ImagePath $img
     }
 
@@ -2143,6 +2154,13 @@ try {
     # Finalization phase
     Optimize-WindowsImage
     Dismount-AndExport
+
+    # Verify the committed image while it is still a WIM. Convert-ToESD deletes it a
+    # few lines later, and DISM cannot mount the solid ESD that replaces it - so this
+    # is the only point where the exported image can still be inspected. Runs before
+    # the boot.wim pass and the 20-30 minute ESD conversion so a bad image fails fast.
+    Assert-InstallImageRecoveryConsistent -ImagePath $wimFilePath
+
     Process-BootImage
 
     # Convert to ESD (CORE-specific: maximum compression)
