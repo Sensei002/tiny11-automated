@@ -272,17 +272,30 @@ Describe 'Gaming power settings JSON' {
         ($power.bcd | Where-Object { $_.args -match 'hypervisorlaunchtype off' }) | Should -Not -BeNullOrEmpty
     }
 
-    It 'sets the energy-performance preference and boost policy under disable_cpu_idle' {
+    It 'sets the energy-performance preference and boost policy unconditionally' {
+        # These two can only widen the clock ceiling, never narrow it, so they must
+        # apply even when C-states are left enabled. Gating them behind
+        # disable_cpu_idle meant a build could ship with a capped clock AND no idle
+        # states - the exact combination that pins a 3.6 GHz part at 3.4 GHz.
         $epp = $power.settings | Where-Object { $_.setting -eq '36687f9e-e3a5-4dbf-b1dc-15eb381c6863' }
         $epp | Should -Not -BeNullOrEmpty
         $epp.ac | Should -Be 0
-        $epp.group | Should -Be 'disable_cpu_idle'
+        $epp.group | Should -BeNullOrEmpty
         $epp.beyondAtlas | Should -BeTrue
 
         $boost = $power.settings | Where-Object { $_.setting -eq '45bcc044-d885-43e2-8605-ee0ec6e96b59' }
         $boost | Should -Not -BeNullOrEmpty
         $boost.ac | Should -Be 100
-        $boost.group | Should -Be 'disable_cpu_idle'
+        $boost.group | Should -BeNullOrEmpty
+    }
+
+    It 'uses the Enabled boost mode rather than Aggressive' {
+        # 2 (Aggressive) overrides the platform's own boost and power budget, and on
+        # locked/non-K parts can hold the package at its guaranteed frequency.
+        $mode = $power.settings | Where-Object { $_.setting -eq 'be337238-0d82-4146-a960-4f3749d470c7' }
+        $mode | Should -Not -BeNullOrEmpty
+        $mode.ac | Should -Be 1
+        $mode.dc | Should -Be 1
     }
 
     It 'keeps the storage and USB links out of low-power states' {
@@ -645,13 +658,19 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
         }
     }
 
-    It 'deletes the three services that make a WU disable stick' {
+    It 'disables the three services that make a WU disable stick' {
         # WaaSMedicSvc repairs a disabled Windows Update, UsoSvc runs the boot
         # servicing pass, wuauserv is Windows Update itself. Leaving any of them is
         # what lets "Updates are underway, do not turn off your PC" come back.
+        #
+        # They are DISABLED, not deleted: deleting an inbox service key gets undone
+        # by the servicing stack on the first online boot, and that delete/restore
+        # cycle is what produces the back-to-back double restart.
         foreach ($service in @('WaaSMedicSvc', 'UsoSvc', 'wuauserv')) {
             $builder | Should -Match ([regex]::Escape("'$service'"))
         }
+        $builder | Should -Not -Match "Remove-Item[^\r\n]*Services\\wuauserv"
+        $builder | Should -Not -Match "Remove-RegistryKey[^\r\n]*Services\\wuauserv"
     }
 
     It 'removes the Update Orchestrator scheduled tasks' {
@@ -693,11 +712,17 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
     }
 
     It 'leaves the plain Core Windows Update disable in place' {
-        # Regression guard: a plain Core build must keep the weaker localhost +
-        # Start=4 disable. It now inherits the single, corrected page-visibility
-        # write rather than shipping a copy of its own.
+        # Regression guard: a plain Core build must keep the Start=4 disable for all
+        # three services. The localhost WSUS redirect is deliberately gone - pointing
+        # the client at http://localhost is what made the Settings page render
+        # "An error occurred" - so the access policy plus the disabled services are
+        # what hold now.
         $builder | Should -Match ([regex]::Escape("Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess'"))
-        $builder | Should -Match ([regex]::Escape("'HKLM\zSYSTEM\ControlSet001\Services\wuauserv' 'Start' 'REG_DWORD' '4'"))
+        $builder | Should -Match ([regex]::Escape("@('wuauserv', 'UsoSvc', 'WaaSMedicSvc')"))
+        $builder | Should -Match '\$wuService'
+        $builder | Should -Match ([regex]::Escape("'Start' 'REG_DWORD' '4'"))
+        $builder | Should -Not -Match "'WUServer'"
+        $builder | Should -Not -Match "'UseWUServer'"
         $builder | Should -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'"))
     }
 

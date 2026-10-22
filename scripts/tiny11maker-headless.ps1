@@ -806,7 +806,7 @@ function Apply-PerformanceTweaks {
     # Disable last-access timestamp update on every file read — eliminates per-read metadata writes
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisableLastAccessUpdate'  'REG_DWORD' '1'
     # Allow NTFS more memory for its internal metadata cache
-    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsMemoryUsage'              'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsMemoryUsage'              'REG_DWORD' '1'
     # Ensure SSD TRIM delete notifications are not suppressed
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'DisableDeleteNotification'    'REG_DWORD' '0'
 

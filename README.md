@@ -65,7 +65,7 @@ Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 
 ## 🆕 What's New (January 2026)
 
 **🎮 Tiny11 Core-Gaming — new variant:**
-- ⚡ **AtlasOS-style power scheme**: no CPU idle (C-State 0), no core parking, no USB/PCIe power saving
+- ⚡ **AtlasOS-style power scheme**: no core parking, no USB/PCIe power saving, 100% min processor state (C-State 0 is available as an opt-in toggle, off by default because it caps the boost clock on some hardware)
 - 🎯 **Latency-first tweaks**: Game Mode off, Fullscreen Optimizations off, MPO off, mouse acceleration off
 - 🔓 **Security mitigations off**: VBS / Memory Integrity / Credential Guard / Spectre-Meltdown
 - 🔁 **Reversible**: ships an undo script and a per-build manifest inside the ISO
@@ -283,7 +283,7 @@ Siege on a CPU-bound machine.
 
 | Area | Changes |
 |------|---------|
-| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds a C-State 0 latency tweak Atlas does *not* do, behind its own toggle, plus the energy-performance preference and boost policy that HWP/CPPC CPUs actually act on, and no storage-link power saving |
+| **Power** | The **Atlas Power Scheme**, reproduced exactly. Verified against the live Atlas scheme, which turns out to be Ultimate Performance plus exactly two overrides. Adds the energy-performance preference and boost policy that HWP/CPPC CPUs actually act on, and no storage-link power saving. A C-State 0 tweak Atlas does *not* do is available behind its own toggle and is **off by default** — it caps the boost clock on some hardware |
 | **CPU** | Power throttling off, `SystemResponsiveness` = 10 (AtlasOS value) |
 | **Security** | VBS off · HVCI / Memory Integrity off · Credential Guard off · Spectre/Meltdown mitigations off · `hypervisorlaunchtype off` |
 | **Latency** | Nagle off · QoS reserved bandwidth 0 · Delivery Optimization P2P off · MPO off · mouse acceleration off · DXGI flip model on with VRR optimisation on · USB 3 link power management off |
@@ -890,9 +890,9 @@ Accepts **every input from Build Tiny11 Core** (`windows_version`, `windows_iso_
 hags:                       # type: choice
   options: [on, off, leave] # default: on
 
-# Each of these is a boolean, default: true
+# Each of these is a boolean, default: true - except disable_cpu_idle, default: false
 atlas_power_scheme:         # AtlasOS-style power scheme
-disable_cpu_idle:           # Force C-State 0
+disable_cpu_idle:           # Force C-State 0 (default FALSE - caps boost clock on some CPUs)
 disable_security_mitigations: # VBS / HVCI / Credential Guard / Spectre-Meltdown off
 remove_xbox_gaming_stack:   # Removes Xbox + Gaming Services (breaks Game Pass)
 strip_background_noise:     # Search indexing, Bluetooth, background apps, ...

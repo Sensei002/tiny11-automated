@@ -124,10 +124,10 @@ on:
         required: false
         default: true
       disable_cpu_idle:
-        description: 'Gaming: Force CPU to C-State 0 (no idle) to remove C-State wake latency. Higher idle power and temps.'
+        description: 'Gaming: Force CPU to C-State 0 (no idle). OFF by default - it stops turbo on a lot of hardware (a 3.6 GHz CPU then reads 3.4 GHz) and raises idle power. Enable only if you measured a wake-latency win.'
         type: boolean
         required: false
-        default: true
+        default: false
       disable_security_mitigations:
         description: 'Gaming: Disable VBS, Memory Integrity (HVCI), Credential Guard, System Guard and Spectre/Meltdown mitigations. Biggest FPS lever - and a real security downgrade.'
         type: boolean

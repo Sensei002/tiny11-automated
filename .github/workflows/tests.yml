@@ -1,0 +1,93 @@
+name: Tests
+
+# The tuning invariants in tests/Test-TuningInvariants.Tests.ps1 exist because three
+# shipped bugs were silent: a capped CPU clock, Windows Update re-enabling itself,
+# and an inflated idle memory footprint. None of them fail a build. A test that is
+# never executed protects nothing, so this workflow is what makes those assertions
+# binding.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'config/**'
+      - 'tests/**'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  powershell:
+    name: Pester (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+
+      - name: Parse-check every script
+        shell: pwsh
+        run: |
+          # A syntax error in a builder only shows up 40 minutes into a build, so
+          # fail here instead.
+          $failed = $false
+          Get-ChildItem -Path scripts -Filter *.ps1 -Recurse | ForEach-Object {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "::error file=$($_.FullName)::$($errors.Count) parse error(s), first: $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))"
+            }
+          }
+          if ($failed) { exit 1 }
+          Write-Host "All scripts parse."
+
+      - name: Run Pester
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+  python:
+    name: Python (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # pyyaml is required by tests/validate_workflow.py and was missing from
+          # requirements.txt, which is why that validator could never run.
+          pip install requests pyyaml pytest
+
+      - name: Validate workflow inputs
+        run: python tests/validate_workflow.py
+
+      - name: Unit tests
+        run: python -m pytest tests/test_discord_notify.py -v

@@ -794,22 +794,30 @@ function Remove-WindowsUpdateStack {
     # -GamingProfile only. Registry half of the complete Windows Update removal, so
     # it must run AFTER Load-RegistryHives.
     #
-    # The always-on Core tweak sets wuauserv to Start=4 and redirects Windows Update
-    # to localhost. That is NOT sufficient on modern Windows, and it is why a Core
-    # image can still show "Updates are underway, do not turn off your PC":
+    # The always-on Core tweak sets all three services to Start=4, which is NOT
+    # sufficient on modern Windows, and it is why a Core image can still show
+    # "Updates are underway, do not turn off your PC":
     #
     #   * WaaSMedicSvc (Windows Update Medic) exists specifically to detect a
-    #     disabled or broken Windows Update and put it back.
+    #     disabled or broken Windows Update and put it back. Disabling it is not
+    #     enough on its own - its PerformRemediation task has to be gone too, which
+    #     Remove-ScheduledTasks handles.
     #   * UsoSvc (Update Orchestrator) runs the servicing pass at boot.
     #
     # Leave either in place and Windows Update re-arms itself a restart or two
-    # later. The keys are deleted outright rather than set to Start=4, matching how
-    # Remove-DefenderRegistry treats the Defender services.
+    # later.
+    #
+    # These are DISABLED, not deleted. Deleting an inbox service key looks final but
+    # is not: the servicing stack restores missing inbox service registrations on
+    # the first online boot, so the key comes back - and the delete/restore cycle is
+    # itself a pending servicing operation, which is what produces the back-to-back
+    # double restart. Start=4 on a key that still exists has nothing to repair and
+    # survives.
     #
     # DoSvc (Delivery Optimization) is deliberately NOT touched here - it is owned
-    # by the profile's strip_background_noise group, so deleting it unconditionally
+    # by the profile's strip_background_noise group, so changing it unconditionally
     # would ignore that group's toggle.
-    Write-Log "Removing the Windows Update stack (GamingProfile)..." "INFO"
+    Write-Log "Disabling the Windows Update stack (GamingProfile)..." "INFO"
 
     foreach ($service in @(
         'WaaSMedicSvc',   # Windows Update Medic - repairs and re-enables Windows Update
@@ -817,19 +825,19 @@ function Remove-WindowsUpdateStack {
         'wuauserv'        # Windows Update
     )) {
         $serviceKey = "HKLM:\zSYSTEM\ControlSet001\Services\$service"
-        if (Test-Path $serviceKey) {
-            Remove-Item -Path $serviceKey -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path $serviceKey) {
-                Write-Log "Could not delete Windows Update service key (locked or access denied): $service" "WARN"
-            } else {
-                Write-Log "Deleted Windows Update service key: $service"
-            }
-        } else {
-            Write-Log "Windows Update service key not present: $service"
+        if (-not (Test-Path $serviceKey)) {
+            Write-Log "Windows Update service key not present: $service" "WARN"
+            continue
         }
+        Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$service" 'Start' 'REG_DWORD' '4'
+        Write-Log "Disabled Windows Update service: $service (Start=4)"
     }
 
-    # Policy side, belt and braces alongside the always-on localhost redirect.
+    # Policy side. The localhost WSUS redirect that used to be written by the
+    # always-on tweak is gone (it broke the Settings page), so the access policies
+    # are what close the door here.
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'SetDisableUXWUAccess' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
 
     # The Settings page visibility value is deliberately NOT written here.
@@ -1386,20 +1394,35 @@ function Apply-RegistryTweaks {
     # Prevent new Outlook installation
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Mail' 'PreventRun' 'REG_DWORD' '1'
 
-    # Disable Windows Update services
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'StopWUPostOOBE1' 'REG_SZ' 'net stop wuauserv'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'StopWUPostOOBE2' 'REG_SZ' 'sc stop wuauserv'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'StopWUPostOOBE3' 'REG_SZ' 'sc config wuauserv start= disabled'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'DisbaleWUPostOOBE1' 'REG_SZ' 'reg add HKLM\SYSTEM\CurrentControlSet\Services\wuauserv /v Start /t REG_DWORD /d 4 /f'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'DisbaleWUPostOOBE2' 'REG_SZ' 'reg add HKLM\SYSTEM\ControlSet001\Services\wuauserv /v Start /t REG_DWORD /d 4 /f'
+    # Disable Windows Update
+    #
+    # Disable, never delete. Deleting an inbox service key does not survive: the
+    # servicing stack restores missing inbox service registrations on the first
+    # online boot, which is exactly the "connects to the internet, reboots twice,
+    # Windows Update is back" behaviour. Start=4 on a key that still exists is what
+    # actually holds.
+    #
+    # WaaSMedicSvc (Windows Update Medic) exists to notice that wuauserv is
+    # disabled and put it back, so it has to be disabled too. Its remediation task
+    # lives in Windows\System32\Tasks\Microsoft\Windows\WaaSMedic and is removed by
+    # Remove-ScheduledTasks; the service alone is not enough.
+    foreach ($wuService in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
+        Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$wuService" 'Start' 'REG_DWORD' '4'
+    }
+
+    # Policy layer.
+    #
+    # There is deliberately NO WUServer / WUStatusServer / UseWUServer redirect.
+    # Pointing the client at http://localhost made the Settings app fail its
+    # Windows Update COM query, which is what rendered "An error occurred" instead
+    # of a managed state. The access policies below close the same door without
+    # breaking the page.
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DoNotConnectToWindowsUpdateInternetLocations' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'WUServer' 'REG_SZ' 'localhost'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'WUStatusServer' 'REG_SZ' 'localhost'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'UpdateServiceUrlAlternate' 'REG_SZ' 'localhost'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'UseWUServer' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'SetDisableUXWUAccess' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'ExcludeWUDriversInQualityUpdate' 'REG_DWORD' '1'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'DisableOnline' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Services\wuauserv' 'Start' 'REG_DWORD' '4'
 
     # Disable Windows Defender
     Write-Log "Disabling Windows Defender services..."
@@ -1450,7 +1473,17 @@ function Remove-ScheduledTasks {
         "$tasksPath\Microsoft\Windows\Customer Experience Improvement Program",
         "$tasksPath\Microsoft\Windows\Application Experience\ProgramDataUpdater",
         "$tasksPath\Microsoft\Windows\Chkdsk\Proxy",
-        "$tasksPath\Microsoft\Windows\Windows Error Reporting\QueueReporting"
+        "$tasksPath\Microsoft\Windows\Windows Error Reporting\QueueReporting",
+        # Windows Update scheduling layer. WaaSMedic is the important one: its
+        # PerformRemediation task re-enables wuauserv after a reboot or two even
+        # when the service is set to Start=4, which is what makes Windows Update
+        # reappear on a connected machine. UpdateOrchestrator and InstallService
+        # are the boot-time servicing pass, and WindowsUpdate schedules the
+        # scan itself.
+        "$tasksPath\Microsoft\Windows\WaaSMedic",
+        "$tasksPath\Microsoft\Windows\UpdateOrchestrator",
+        "$tasksPath\Microsoft\Windows\WindowsUpdate",
+        "$tasksPath\Microsoft\Windows\InstallService"
     )
 
     foreach ($task in $tasksToRemove) {
@@ -1503,8 +1536,12 @@ function Apply-PerformanceTweaks {
     Write-Log "Applying performance optimizations (gaming/VM profile)..."
 
     # ── Memory Management ──────────────────────────────────────────────────
-    # Keep kernel-mode drivers in physical RAM — eliminates paging latency spikes during gaming
-    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'DisablePagingExecutive'  'REG_DWORD' '1'
+    # DisablePagingExecutive=1 pins kernel-mode drivers in physical RAM. On a 16 GB
+    # machine that buys a real reduction in paging latency; on 8 GB it just hands a
+    # few hundred MB of a scarce resource to the kernel, and the image cannot know
+    # how much RAM the target has. Default 0 is the Windows default and the value
+    # the Standard builder has always used - the two had drifted apart.
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'DisablePagingExecutive'  'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'LargeSystemCache'        'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management' 'ClearPageFileAtShutdown' 'REG_DWORD' '0'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Memory Management\PrefetchParameters' 'EnablePrefetcher' 'REG_DWORD' '0'
@@ -1528,7 +1565,7 @@ function Apply-PerformanceTweaks {
     # ── Storage / NTFS ────────────────────────────────────────────────────
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisable8dot3NameCreation' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsDisableLastAccessUpdate'  'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsMemoryUsage'              'REG_DWORD' '2'
+    Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'NtfsMemoryUsage'              'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\FileSystem' 'DisableDeleteNotification'    'REG_DWORD' '0'
 
     # ── Network / TCP ─────────────────────────────────────────────────────
@@ -1559,14 +1596,20 @@ function Apply-PerformanceTweaks {
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\Session Manager\Power' 'HiberbootEnabled' 'REG_DWORD' '0'
     # Keep crash dump on BSOD instead of silent auto-reboot — preserves minidump for analysis
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\CrashControl' 'AutoReboot' 'REG_DWORD' '0'
-    # BCD: short boot menu + keep the system timer from going tickless while idle.
-    # 'useplatformtick yes' used to be set here as well. It forces the platform
-    # timer (HPET-class) as the tick source, which makes every timer read more
-    # expensive than the invariant TSC and can raise DPC cost - the opposite of
-    # what a latency-first build wants. It is now deleted instead, so images built
-    # from an older revision get corrected too.
+    # BCD: short boot menu, and undo two timer settings that cost more than they buy.
+    #
+    # 'useplatformtick yes' forces the platform timer (HPET-class) as the tick
+    # source, which makes every timer read more expensive than the invariant TSC and
+    # can raise DPC cost.
+    #
+    # 'disabledynamictick yes' keeps the system timer at a constant rate instead of
+    # going tickless. On a lot of platforms that stops the processor power engine
+    # from offering turbo, so the package parks at its highest non-boost P-state - a
+    # 3.6 GHz part then reads a constant 3.4 GHz - and it raises idle power. Both
+    # are deleted rather than set, so images built from an older revision get
+    # corrected too.
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce' 'PerfTuneBCD' 'REG_SZ' `
-        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /set disabledynamictick yes 2>&1 | Out-Null; & bcdedit /deletevalue useplatformtick 2>&1 | Out-Null"'
+        'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "& bcdedit /set timeout 5 2>&1 | Out-Null; & bcdedit /deletevalue disabledynamictick 2>&1 | Out-Null; & bcdedit /deletevalue useplatformtick 2>&1 | Out-Null"'
 
     Write-Log "Performance optimizations applied (gaming/VM profile)"
 }

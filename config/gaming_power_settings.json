@@ -255,18 +255,18 @@
       "dc": 1,
       "group": "disable_cpu_idle",
       "beyondAtlas": true,
-      "note": "DIVERGENCE FROM ATLAS. Atlas leaves CPU idle enabled; this forces C-State 0 to remove the C-State wake penalty. Costs idle power and raises temperatures."
+      "note": "OPT-IN. Atlas leaves CPU idle enabled; this forces C-State 0 to remove the C-State wake penalty. It is the single most likely cause of a CPU that sits below its rated clock: with C-states disabled the processor power engine stops offering turbo, so the package parks at its highest non-boost P-state (3.6 GHz part reports 3.4 GHz). Costs idle power and raises temperatures. Only applies when the disable_cpu_idle group is explicitly enabled."
     },
     {
       "name": "Processor performance boost mode",
       "subgroup": "54533251-82be-4824-96c1-47b60b740d00",
       "subgroupName": "Processor power management",
       "setting": "be337238-0d82-4146-a960-4f3749d470c7",
-      "ac": 2,
-      "dc": 2,
+      "ac": 1,
+      "dc": 1,
       "hidden": true,
       "beyondAtlas": true,
-      "note": "2 = Aggressive. Redundant on the Ultimate Performance base; acts as a fallback guarantee if the base template degrades to High performance."
+      "note": "1 = Enabled. This used to be 2 (Aggressive), which is the wrong value here: Aggressive overrides the platform's own boost and power budget, and on locked/non-K parts it can hold the package at its guaranteed frequency instead of letting it boost. Enabled keeps turbo available and leaves the ceiling to the firmware, which is what the Atlas scheme on a working machine does."
     },
     {
       "name": "Processor performance time check interval",
@@ -297,9 +297,8 @@
       "ac": 0,
       "dc": 0,
       "hidden": true,
-      "group": "disable_cpu_idle",
       "beyondAtlas": true,
-      "note": "0 = maximum performance. This is the hint modern Intel (HWP) and AMD (CPPC) CPUs actually act on: at 100 they prefer efficiency and leave frequency on the table even when the workload is latency-bound. Only meaningful because core parking and idle states are already off."
+      "note": "0 = maximum performance. This is the hint modern Intel (HWP) and AMD (CPPC) CPUs actually act on: at 100 they prefer efficiency and leave frequency on the table even when the workload is latency-bound. Deliberately NOT in the disable_cpu_idle group - it can only raise the clock ceiling, so it belongs in every build, including the ones that keep C-states enabled."
     },
     {
       "name": "Processor performance boost policy",
@@ -309,9 +308,8 @@
       "ac": 100,
       "dc": 100,
       "hidden": true,
-      "group": "disable_cpu_idle",
       "beyondAtlas": true,
-      "note": "100 = allow the full boost clock instead of the OS trimming boost for efficiency."
+      "note": "100 = allow the full boost clock instead of the OS trimming boost for efficiency. Also outside the disable_cpu_idle group: it only widens the ceiling."
     },
     {
       "name": "AHCI Link Power Management - HIPM/DIPM",
@@ -359,9 +357,9 @@
       "note": "Prefer the invariant TSC over the platform clock."
     },
     {
-      "args": "/set disabledynamictick yes",
-      "group": "disable_cpu_idle",
-      "note": "Keep the system timer running at a constant rate instead of going tickless while idle. Mild consistency gain, real idle-power cost - hence the group."
+      "args": "/deletevalue disabledynamictick",
+      "ignoreFailure": true,
+      "note": "REMOVED FROM THE PROFILE, and actively undone. Earlier revisions set 'disabledynamictick yes' to keep the system timer at a constant rate. That also stops the processor power engine offering turbo on a lot of platforms, which pins the CPU at its highest non-boost P-state - the '3.4 GHz instead of 3.6 GHz' symptom - and raises idle power. Images built from an older revision get the value deleted here. 'not present' is the normal outcome on a fresh build."
     },
     {
       "args": "/deletevalue useplatformtick",

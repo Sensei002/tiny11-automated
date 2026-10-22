@@ -11,7 +11,7 @@
   },
   "defaultGroups": {
     "atlas_power_scheme": true,
-    "disable_cpu_idle": true,
+    "disable_cpu_idle": false,
     "disable_security_mitigations": true,
     "remove_xbox_gaming_stack": true,
     "strip_background_noise": true,
@@ -27,7 +27,7 @@
   },
   "groupDescriptions": {
     "atlas_power_scheme": "Custom AtlasOS-style power scheme, imported and activated at first boot.",
-    "disable_cpu_idle": "Force CPU to C-State 0 (no idle) to remove C-State wake latency.",
+    "disable_cpu_idle": "OPT-IN, off by default. Forces the CPU to C-State 0 (no idle) to remove the C-State wake latency. It also stops the processor power engine offering turbo on a lot of hardware, which pins the CPU at its highest non-boost P-state (a 3.6 GHz part reads 3.4 GHz). Leave off unless you have measured a wake-latency win on your own machine.",
     "disable_security_mitigations": "Turn off VBS, HVCI, Credential Guard, System Guard and Spectre/Meltdown mitigations.",
     "remove_xbox_gaming_stack": "Remove Xbox Live / Gaming Services stack and Xbox AppX packages.",
     "strip_background_noise": "Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics, and turn off memory compression on machines with 16 GB or more.",
