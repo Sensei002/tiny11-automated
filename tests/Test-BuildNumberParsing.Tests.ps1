@@ -5,10 +5,43 @@
     Run: Invoke-Pester ./tests/Test-BuildNumberParsing.Tests.ps1
 
 .NOTES
-    Pester 5 requires helper functions and path resolution to live inside BeforeAll:
-    code at the top level of a test file runs during discovery, so anything it defines
-    (or any $PSScriptRoot it reads) is not visible to the It blocks at run time.
+    Two different phases are in play here, and confusing them is what broke this file:
+
+      * Discovery - BeforeDiscovery runs, then `It -ForEach` is expanded.
+      * Run       - BeforeAll executes, then each It block.
+
+    So -ForEach data must be built in BeforeDiscovery, while helper functions belong in
+    BeforeAll. This file used to build the data inside BeforeAll, which left the
+    -ForEach argument $null during discovery: Pester 5 silently created zero tests -
+    every script-content assertion in this file was passing without ever running - and
+    Pester 6 turns that into "Value can not be null or empty array".
+
+    It is not enough to put the data at the top level of the file either: $PSScriptRoot
+    is not populated there during discovery, so the paths resolve to nothing and every
+    assertion runs against $null.
 #>
+
+BeforeDiscovery {
+    # Hashtables, not [pscustomobject]. Pester binds -ForEach entries into the It block
+    # by property name, and it does that for hashtable keys; a pscustomobject entry
+    # binds nothing, so <scriptName> expands to $null and every assertion runs against
+    # $null. That is what made this file look green while testing nothing.
+    $script:RepoRoot = Split-Path -Parent $PSScriptRoot
+    $script:Scripts = foreach ($relative in @(
+        'scripts\tiny11maker-headless.ps1',
+        'scripts\tiny11coremaker-headless.ps1',
+        'scripts\nano11builder-headless.ps1'
+    )) {
+        $full = Join-Path $script:RepoRoot $relative
+        $body = ''
+        if (Test-Path -LiteralPath $full) { $body = Get-Content -LiteralPath $full -Raw }
+        @{
+            scriptName = Split-Path -Leaf $full
+            scriptPath = $full
+            content    = $body
+        }
+    }
+}
 
 BeforeAll {
     # Mirror of the extraction block the builders use. The builders run their whole
@@ -20,20 +53,6 @@ BeforeAll {
             return $Matches[1]
         }
         return ""
-    }
-
-    $script:RepoRoot = Split-Path -Parent $PSScriptRoot
-    $script:Scripts = @(
-        'scripts\tiny11maker-headless.ps1',
-        'scripts\tiny11coremaker-headless.ps1',
-        'scripts\nano11builder-headless.ps1'
-    ) | ForEach-Object {
-        $full = Join-Path $script:RepoRoot $_
-        [pscustomobject]@{
-            scriptName = Split-Path -Leaf $full
-            scriptPath = $full
-            content    = if (Test-Path -LiteralPath $full) { Get-Content -LiteralPath $full -Raw } else { '' }
-        }
     }
 }
 
