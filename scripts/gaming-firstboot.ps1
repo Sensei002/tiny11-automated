@@ -165,10 +165,15 @@ function Test-GamingPowerScheme {
     #
     # The apply loop above counts a setting as applied when either the AC or the DC
     # write returned 0, which is enough to know powercfg accepted the call but not
-    # enough to know the platform honoured it. The three values below decide the
-    # clock ceiling, and a silently unapplied Maximum processor state is exactly how
-    # a CPU ends up capped below its rated frequency with no visible error. So they
-    # are asserted rather than assumed.
+    # enough to know the platform honoured it. A silently unapplied value is exactly
+    # how a CPU ends up pinned below its rated frequency with no visible error, so
+    # the four values that set the clock floor and ceiling are asserted, not assumed.
+    #
+    # The floor matters as much as the ceiling: a scheme with maximum state 100 but
+    # minimum state 5 passes every ceiling check while idling at its lowest P-state,
+    # which reads as "the CPU is not reaching its rated clock". Minimum processor
+    # state is the value that actually holds a 3.6 GHz part at 3.6 GHz, and it was
+    # the one thing this function did not look at.
     param([string]$SchemeGuid)
 
     if (-not $SchemeGuid) { return }
@@ -180,6 +185,7 @@ function Test-GamingPowerScheme {
     }
 
     $checks = @(
+        @{ Name = 'Minimum processor state';           Guid = '893dee8e-2bef-41e0-89c6-b55d0929964c'; Expected = 100 },
         @{ Name = 'Maximum processor state';           Guid = 'bc5038f7-23e0-4960-96da-33abaf5935ec'; Expected = 100 },
         @{ Name = 'Processor performance boost mode';  Guid = 'be337238-0d82-4146-a960-4f3749d470c7'; Expected = 1   },
         @{ Name = 'Processor performance boost policy';Guid = '45bcc044-d885-43e2-8605-ee0ec6e96b59'; Expected = 100 }

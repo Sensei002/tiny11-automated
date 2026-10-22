@@ -116,6 +116,21 @@ Describe 'CPU clock ceiling' {
         $firstBootSource | Should -Match 'function\s+Test-GamingPowerScheme'
         $firstBootSource | Should -Match 'Test-GamingPowerScheme\s+-SchemeGuid'
     }
+
+    It 'verifies the clock floor as well as the ceiling' {
+        # Maximum state, boost mode and boost policy all describe the ceiling. A
+        # scheme can pass all three while sitting at its lowest P-state, because
+        # nothing pins the floor - and the floor is what actually holds a 3.6 GHz
+        # part at 3.6 GHz. Minimum processor state has to be in the checked set.
+        $firstBootSource | Should -Match '893dee8e-2bef-41e0-89c6-b55d0929964c'
+    }
+
+    It 'writes a 100% minimum processor state on AC' {
+        $floor = @($powerConfig.settings | Where-Object { $_.setting -eq '893dee8e-2bef-41e0-89c6-b55d0929964c' })
+        $floor.Count | Should -Be 1
+        $floor[0].ac | Should -Be 100
+        $floor[0].group | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Windows Update stays gone' {

@@ -371,6 +371,48 @@ base template ever falls back to High performance.
 > **Power cost.** C-State 0 means higher idle power and higher temperatures. Fine on a
 > desktop gaming rig; think twice on a laptop.
 
+### Getting a constant max clock
+
+C-State 0 is **not** the lever for a high, steady clock — it is the thing that was
+holding it down. If you want a 3.6 GHz part to read 3.6 GHz instead of 3.4 GHz, leave
+`disable_cpu_idle` off and work down this list:
+
+| # | Lever | Wanted | Where it comes from |
+|---|---|---|---|
+| 1 | Minimum processor state (AC) | `100` | written by this scheme — **this is the one that pins the clock** |
+| 2 | Maximum processor state (AC) | `100` | written |
+| 3 | Processor performance boost mode | `1` (Enabled) | written |
+| 4 | Processor performance boost policy | `100` | written |
+| 5 | Energy-performance preference | `0` | written |
+| 6 | Core parking min cores | `100` | written |
+| 7 | Processor idle disable | `0` — idle **enabled** | default; do not turn it on |
+| 8 | `disabledynamictick` / `useplatformtick` in BCD | **absent** | deleted by the builder |
+| 9 | BIOS Turbo Boost / Core Performance Boost | enabled | firmware — not Windows |
+| 10 | Power and thermal limits (PL1/PL2, PROCHOT) | not throttling | firmware — not Windows |
+
+Items 1–8 are all handled by the build, and `gaming-firstboot.ps1` now reads 1–4 back out
+of the activated scheme and logs a `MISMATCH` line if any of them did not stick. If the
+clock is still capped after a clean install, the cause is 9 or 10, and nothing in Windows
+can override those.
+
+Verify on a live install rather than trusting the log:
+
+```powershell
+powercfg /getactivescheme
+powercfg /q SCHEME_CURRENT SUB_PROCESSOR
+```
+
+`Current AC Power Setting Index` must read `0x00000064` for both `893dee8e…` (minimum
+state) and `bc5038f7…` (maximum state). Then watch **HWiNFO64 → Core Clocks** under load:
+if the clock never exceeds base while *Turbo Boost* reports as supported, the firmware is
+refusing turbo, not Windows.
+
+> **"Always" has a limit.** Turbo is opportunistic by design. Windows can remove the
+> brakes, but it cannot promise a *sustained* clock — an all-core load on a power-limited
+> part will drop below the single-core turbo figure no matter what the power scheme says.
+> The scheme guarantees the clock never falls below base and that boost is available; the
+> rest is the CPU's power budget and your cooler.
+
 The scheme is exported to `C:\Windows\Tiny11Gaming\Atlas-Power-Scheme.pow` so you can
 move it to another machine.
 
@@ -611,8 +653,8 @@ offline hives the builder loads (`HKLM\zSYSTEM`, `zSOFTWARE`, `zDEFAULT`, `zNTUS
 This matters more than the tweak list.
 
 - **Frame-time consistency improves more than average FPS.** The latency tweaks
-  (C-State 0, no core parking, mitigations off, MPO off, MSI mode) mostly show up in 1%
-  lows and input latency, not in a big average-FPS number.
+  (no core parking, boost policy, mitigations off, MPO off, MSI mode) mostly show up in
+  1% lows and input latency, not in a big average-FPS number.
 - **Disabling VBS/HVCI is the largest single lever**, typically quoted at 5–15% on
   affected titles. It is also the biggest security cost.
 - **The device layer is worth more on some machines than others.** MSI mode and
@@ -629,8 +671,9 @@ This matters more than the tweak list.
 
 ## Rainbow Six Siege notes
 
-- R6 Siege is **CPU-bound**, so `disable_cpu_idle`, the 100% min processor state,
-  mitigations off and MPO off are the changes that matter most here.
+- R6 Siege is **CPU-bound**, so the 100% min processor state, boost policy,
+  mitigations off and MPO off are the changes that matter most here. `disable_cpu_idle`
+  is *not* on that list — it is off by default and it lowers the clock on most parts.
 - **BattlEye is unaffected** by anything in this profile. It does not object to VBS
   being off, to Xbox services being removed, or to the network tweaks.
 - **Disable fullscreen optimizations** (`disable_fso`, on by default here) is what most
