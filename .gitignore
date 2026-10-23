@@ -19,6 +19,7 @@ env/
 # Build Artifacts & Logs
 Tiny11*/
 Win11_Source.iso
+LTSC_Source.iso
 scripts/tiny11-core.iso
 scripts/tiny11.iso
 scripts/nano11.iso

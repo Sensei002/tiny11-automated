@@ -265,6 +265,8 @@ Set-ExecutionPolicy Bypass -Scope Process
 - **🔴 Nano**: Absolute minimal testing only. Expect broken features. VM use ONLY.
 - **🎮 Core-Gaming**: Core plus a latency-first gaming profile. Built for competitive
   esports on older hardware — see the section below before you use it.
+- **🏢 LTSC**: Standard or Core on Windows 11 / Windows 10 Enterprise LTSC media.
+  Separate workflows, edition picked by name — see [LTSC.md](LTSC.md).
 
 ---
 
@@ -347,6 +349,32 @@ Full write-up, per-setting rationale and trade-offs: **[GAMING.md](GAMING.md)**.
 
 ---
 
+## 🏢 Tiny11 LTSC
+
+Two extra workflows build the same variants on Windows 11 / Windows 10 Enterprise
+LTSC media. LTSC is not on Microsoft's public download page, so both take a pasted
+ISO URL:
+
+| Workflow | Builder | Serviceable |
+|----------|---------|-------------|
+| **Build and Release Tiny11 LTSC** | `tiny11maker-headless.ps1` | ✅ Yes |
+| **Build and Release Tiny11 Core LTSC** | `tiny11coremaker-headless.ps1` | ❌ No |
+
+**There is no image-index dropdown.** LTSC media carries three images on Windows 11
+(Enterprise, IoT Enterprise, IoT Enterprise Subscription) and two on Windows 10, and
+the numbers mean different things per ISO. So you pick the edition by name, the
+workflow reads the real image table off the mounted ISO, and the builder re-checks the
+name before it mounts — a mismatch stops the run instead of shipping the wrong SKU.
+
+```yaml
+ltsc_edition: 'Windows 11 IoT Enterprise LTSC'
+windows_iso_url: 'https://…'   # direct link, required
+```
+
+Editions, indexes, servicing caveats and troubleshooting: **[LTSC.md](LTSC.md)**.
+
+---
+
 ## 📁 Repository Structure
 
 ```
@@ -356,6 +384,8 @@ tiny11-automated/
 │   │   ├── build-tiny11.yml
 │   │   ├── build-tiny11-core.yml
 │   │   ├── build-tiny11-core-gaming.yml   # 🎮 Core + gaming profile
+│   │   ├── build-tiny11-ltsc.yml          # 🏢 Standard on LTSC media
+│   │   ├── build-tiny11-core-ltsc.yml     # 🏢 Core on LTSC media
 │   │   └── build-nano11.yml
 │   ├── ISSUE_TEMPLATE/         # Issue templates
 │   └── PULL_REQUEST_TEMPLATE.md
@@ -370,6 +400,7 @@ tiny11-automated/
 │   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core (+ -GamingProfile)
 │   ├── nano11builder-headless.ps1        # ✨ Automated Nano
+│   ├── ltsc-edition-catalog.ps1          # 🏢 LTSC editions, indexes and slugs
 │   ├── gaming-profile.ps1                # 🎮 Profile engine (dot-sourced)
 │   ├── essentials-profile.ps1            # 🎮 Debloat engine (always on for Core-Gaming)
 │   ├── gaming-firstboot.ps1              # 🎮 Runs once as SYSTEM on the target
@@ -378,6 +409,7 @@ tiny11-automated/
 ├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
 ├── GAMING.md                   # 🎮 Core-Gaming documentation
+├── LTSC.md                     # 🏢 LTSC documentation
 ├── CONTRIBUTING.md             # Contributor guidelines
 ├── CODE_OF_CONDUCT.md          # Community standards
 ├── SECURITY.md                 # Security policy
@@ -396,10 +428,17 @@ tiny11-automated/
 .\tiny11maker-headless.ps1
     -ISO <string>              # Drive letter of mounted ISO (e.g., "E")
     -INDEX <int>               # Image index (1=Home, 4=Education, 6=Pro, 7=Pro N)
+    [-ExpectedEdition <string>]# 🏢 Resolve the index by image name instead (LTSC media)
     [-SCRATCH <string>]        # Optional: Scratch disk (default: script directory)
     [-SkipCleanup]             # Optional: Keep temp files for debugging
     [-AccountSetup <string>]   # Optional: "auto-admin" (default) | "classic"
 ```
+
+`-ExpectedEdition` turns `-INDEX` into a hint: the image is located by name on the ISO
+and the index is corrected to match, so a reordered LTSC release still builds the
+edition you asked for. If the name is not on the media at all, the build stops and
+prints every image it found. Consumer builds are unaffected — the parameter is
+optional and defaults to the old fixed-index behaviour. See [LTSC.md](LTSC.md).
 
 ### Core-Only Parameter
 
@@ -805,7 +844,7 @@ then delete the `<AutoLogon>` block.
 
 ### Automated Builds via CI/CD
 
-All three variants support automated building through GitHub Actions:
+Every variant supports automated building through GitHub Actions:
 
 #### 1. Build Tiny11 (Standard)
 **File**: `.github/workflows/build-tiny11.yml`
@@ -842,9 +881,8 @@ skip_cleanup:           # Same as Standard
 enable_dotnet35:        # 🆕 Enable .NET Framework 3.5
   type: boolean
   default: false
-preserve_winre:         # 🆕 Keep winre.wim and the recovery environment
-  type: boolean
-  default: true         # ON: removing it makes real-hardware installs fail at ~10% with 0x80070003
+# WinRE is always preserved. There is no preserve_winre input any more: every build
+# that removed it failed to install at ~10% with 0x80070003.
 
 remove_defender:        # 🆕 Completely remove Windows Defender / Security
   type: boolean
@@ -874,9 +912,7 @@ language:               # Language name (English, etc.)
   default: "English"
   
 skip_cleanup:           # Same as above
-preserve_winre:         # 🆕 Keep winre.wim and the recovery environment
-  type: boolean
-  default: true         # ON: removing it makes real-hardware installs fail at ~10% with 0x80070003
+# WinRE is always preserved. There is no preserve_winre input any more.
 ```
 
 #### 4. Build Tiny11 Core-Gaming 🎮
@@ -884,7 +920,7 @@ preserve_winre:         # 🆕 Keep winre.wim and the recovery environment
 
 Accepts **every input from Build Tiny11 Core** (`windows_version`, `windows_iso_url`,
 `windows_build`, `image_index`, `language`, `skip_cleanup`, `enable_dotnet35`,
-`preserve_winre`, `remove_defender`, `account_setup`) plus one toggle per gaming group:
+`remove_defender`, `account_setup`) plus one toggle per gaming group:
 
 ```yaml
 hags:                       # type: choice
@@ -912,6 +948,39 @@ seconds instead of after an hour. The essentials profile is validated against a
 boot-critical service list, so a bad edit cannot produce an unbootable image.
 
 Full details: **[GAMING.md](GAMING.md)**
+
+#### 5. Build Tiny11 LTSC 🏢
+**File**: `.github/workflows/build-tiny11-ltsc.yml`
+
+The Standard pipeline on Windows 11 / Windows 10 Enterprise LTSC media.
+
+```yaml
+ltsc_edition:           # type: choice, required
+  options:
+    - Windows 11 Enterprise LTSC
+    - Windows 11 IoT Enterprise LTSC
+    - Windows 11 IoT Enterprise Subscription LTSC
+    - Windows 10 Enterprise LTSC
+    - Windows 10 IoT Enterprise LTSC
+
+windows_iso_url:        # Paste a direct LTSC ISO link - required, no default
+windows_build:          # Optional fallback build number
+language:               # File-name language (default: English)
+skip_cleanup:           # Debug mode
+account_setup:          # auto-admin (default) | classic
+```
+
+There is **no `image_index` input**. LTSC media carries three images on Windows 11
+and two on Windows 10, and the numbers mean different things per ISO, so the index is
+read from the mounted ISO instead of being typed. See [LTSC.md](LTSC.md).
+
+#### 6. Build Tiny11 Core LTSC 🏢
+**File**: `.github/workflows/build-tiny11-core-ltsc.yml`
+
+The Core pipeline on the same media. Same inputs as Build Tiny11 LTSC, plus
+`enable_dotnet35` and `remove_defender`. Note that Core strips WinSxS, so an LTSC base
+loses the long-term servicing that LTSC exists for — use the serviceable workflow if
+that matters.
 
 ### Workflow Features
 

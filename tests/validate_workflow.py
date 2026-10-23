@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Static validation for the Tiny11 Core-Gaming GitHub Actions workflow.
+"""Static validation for the Tiny11 GitHub Actions workflows.
 
-Pester covers the workflow structurally (are the inputs declared, is the builder
+Pester covers the workflows structurally (are the inputs declared, is the builder
 invoked), but it cannot parse YAML. A workflow that fails to parse does not load at
 all, so this checks the file is valid YAML, that every input referenced in an
 expression is declared, and that the Core-Gaming workflow stays a superset of the
 Core workflow's inputs.
+
+It also covers the two LTSC workflows, where the risk is different: the image index
+is not a constant. It has to agree with the catalogue, has to be derived rather than
+typed, and has to be verified against the mounted ISO before the builder runs.
 
 Author: kelexine (https://github.com/kelexine)
 License: MIT
@@ -27,6 +31,18 @@ CORE_WF = WORKFLOWS / "build-tiny11-core.yml"
 EXPECTED_NAME = "Build and Release Tiny11 Core-Gaming"
 EXPECTED_JOB = "build-tiny11-core-gaming"
 
+CATALOG = REPO_ROOT / "scripts" / "ltsc-edition-catalog.ps1"
+LTSC_WORKFLOWS = {
+    "build-tiny11-ltsc.yml": {
+        "name": "Build and Release Tiny11 LTSC",
+        "builder": "tiny11maker-headless.ps1",
+    },
+    "build-tiny11-core-ltsc.yml": {
+        "name": "Build and Release Tiny11 Core LTSC",
+        "builder": "tiny11coremaker-headless.ps1",
+    },
+}
+
 problems: list[str] = []
 
 
@@ -45,6 +61,167 @@ def inputs_of(doc) -> set[str]:
     on_block = doc.get("on") or doc.get(True) or {}
     dispatch = on_block.get("workflow_dispatch") or {}
     return set(dispatch.get("inputs") or {})
+
+
+def catalog_entries() -> list[dict[str, str]]:
+    """Read the edition catalogue out of the PowerShell file.
+
+    The catalogue is the single source of truth for the LTSC indexes, so the
+    workflows are checked against it rather than against a second copy of the list
+    kept here. Parsing is deliberately line-based: the entries are flat
+    [pscustomobject] literals and a regex over the whole file would be more
+    fragile than reading them one block at a time.
+    """
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+
+    for line in CATALOG.read_text(encoding="utf-8").splitlines():
+        if "[pscustomobject]@{" in line:
+            current = {}
+            continue
+        if current is not None and line.strip() == "}":
+            entries.append(current)
+            current = None
+            continue
+        if current is not None:
+            match = re.match(r"\s*(\w+)\s*=\s*(.+?)\s*$", line)
+            if match:
+                current[match.group(1)] = match.group(2).strip().strip("'")
+
+    return entries
+
+
+def validate_ltsc_workflows() -> None:
+    print()
+    print("LTSC workflows")
+
+    if not CATALOG.exists():
+        problems.append("missing scripts/ltsc-edition-catalog.ps1")
+        print("[FAIL] scripts/ltsc-edition-catalog.ps1 is missing")
+        return
+
+    entries = catalog_entries()
+    if len(entries) != 5:
+        problems.append(f"catalogue has {len(entries)} entries, expected 5")
+        print(f"[FAIL] catalogue has {len(entries)} entries, expected 5")
+        return
+
+    expected_names = [entry.get("Name", "") for entry in entries]
+    print(f"[ok]   catalogue lists {len(entries)} editions")
+
+    # The index layout the workflows assume, asserted here so a catalogue edit that
+    # silently reshuffles the media is caught in CI rather than in a build.
+    by_family: dict[str, list[tuple[int, str]]] = {}
+    for entry in entries:
+        by_family.setdefault(entry.get("Family", ""), []).append(
+            (int(entry.get("Index", "0")), entry.get("Name", ""))
+        )
+
+    expected_layout = {
+        "Windows 11": [
+            (1, "Windows 11 Enterprise LTSC"),
+            (2, "Windows 11 IoT Enterprise LTSC"),
+            (3, "Windows 11 IoT Enterprise Subscription LTSC"),
+        ],
+        "Windows 10": [
+            (1, "Windows 10 Enterprise LTSC"),
+            (2, "Windows 10 IoT Enterprise LTSC"),
+        ],
+    }
+
+    for family, layout in expected_layout.items():
+        actual = sorted(by_family.get(family, []))
+        if actual == layout:
+            print(f"[ok]   {family} LTSC layout: {len(layout)} images at index "
+                  f"{', '.join(str(i) for i, _ in layout)}")
+        else:
+            problems.append(f"{family} LTSC index layout does not match the media")
+            print(f"[FAIL] {family} layout is {actual}, expected {layout}")
+
+    for filename, spec in LTSC_WORKFLOWS.items():
+        path = WORKFLOWS / filename
+        print(f"\n  {filename}")
+
+        if not path.exists():
+            problems.append(f"missing {filename}")
+            print("[FAIL] file is missing")
+            continue
+
+        try:
+            doc = load_yaml(path)
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"{filename} is not valid YAML: {exc}")
+            print(f"[FAIL] not valid YAML: {exc}")
+            continue
+
+        print("[ok]   parses as valid YAML")
+
+        if doc.get("name") != spec["name"]:
+            problems.append(f"{filename} name is {doc.get('name')!r}")
+            print(f"[FAIL] name is {doc.get('name')!r}, expected {spec['name']!r}")
+        else:
+            print(f"[ok]   name: {spec['name']!r}")
+
+        raw = path.read_text(encoding="utf-8")
+        declared = inputs_of(doc)
+
+        referenced = set(re.findall(r"github\.event\.inputs\.([A-Za-z0-9_-]+)", raw))
+        referenced |= set(re.findall(r"\binputs\.([A-Za-z0-9_-]+)", raw))
+        undeclared = sorted(referenced - declared)
+        if undeclared:
+            for name in undeclared:
+                problems.append(f"{filename}: input {name} referenced but not declared")
+                print(f"[FAIL] referenced but NOT declared: {name}")
+        else:
+            print(f"[ok]   all {len(referenced)} referenced input(s) are declared")
+
+        # The index must be derived, not chosen: a dropdown of raw numbers is
+        # exactly what puts the wrong SKU on someone's machine.
+        if "image_index" in declared:
+            problems.append(f"{filename} still exposes an image_index input")
+            print("[FAIL] image_index is still a workflow input")
+        else:
+            print("[ok]   no image_index input - the index is derived")
+
+        if "windows_iso_url" not in declared:
+            problems.append(f"{filename} has no windows_iso_url input")
+            print("[FAIL] windows_iso_url is missing")
+        else:
+            print("[ok]   windows_iso_url is the paste box")
+
+        dispatch = (doc.get("on") or doc.get(True) or {}).get("workflow_dispatch") or {}
+        options = ((dispatch.get("inputs") or {}).get("ltsc_edition") or {}).get("options") or []
+        if options == expected_names:
+            print(f"[ok]   edition menu matches the catalogue ({len(options)} options)")
+        else:
+            problems.append(f"{filename} edition menu does not match the catalogue")
+            print(f"[FAIL] edition menu is {options}, expected {expected_names}")
+
+        if "ltsc-edition-catalog.ps1" in raw and "Resolve-LTSCEdition" in raw:
+            print("[ok]   resolves the edition through the catalogue")
+        else:
+            problems.append(f"{filename} does not use the catalogue")
+            print("[FAIL] does not use scripts/ltsc-edition-catalog.ps1")
+
+        verify_at = raw.find("Verify the LTSC edition is on the ISO")
+        builder_at = raw.find(spec["builder"])
+        if verify_at < 0:
+            problems.append(f"{filename} does not verify the ISO edition")
+            print("[FAIL] no ISO edition verification step")
+        elif builder_at < 0:
+            problems.append(f"{filename} does not invoke {spec['builder']}")
+            print(f"[FAIL] does not invoke {spec['builder']}")
+        elif verify_at > builder_at:
+            problems.append(f"{filename} verifies the ISO after the builder runs")
+            print("[FAIL] ISO verification must precede the builder")
+        else:
+            print("[ok]   ISO verified before the builder runs")
+
+        if "ExpectedEdition = $env:LTSC_EDITION_NAME" in raw:
+            print("[ok]   -ExpectedEdition is passed to the builder")
+        else:
+            problems.append(f"{filename} does not pass -ExpectedEdition")
+            print("[FAIL] -ExpectedEdition is not passed")
 
 
 def main() -> int:
@@ -139,6 +316,8 @@ def main() -> int:
     else:
         problems.append("profile validation does not precede the ISO download")
         print("[FAIL] profile validation should precede the ISO download")
+
+    validate_ltsc_workflows()
 
     print()
     print("=" * 68)

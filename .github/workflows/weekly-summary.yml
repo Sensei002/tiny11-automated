@@ -52,6 +52,9 @@ jobs:
               "build-nano11.yml",
               "build-tiny11.yml",
               "build-tiny11-core.yml",
+              "build-tiny11-core-gaming.yml",
+              "build-tiny11-ltsc.yml",
+              "build-tiny11-core-ltsc.yml",
           ]
 
           completed = 0

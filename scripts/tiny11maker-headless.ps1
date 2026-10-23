@@ -59,6 +59,9 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Skip cleanup of temporary files")]
     [switch]$SkipCleanup,
 
+    [Parameter(Mandatory=$false, HelpMessage="Expected edition name, e.g. 'Windows 11 IoT Enterprise LTSC'. When set, -INDEX is treated as a hint: the image is located by name on the ISO and the index is corrected to match. Required for LTSC media, whose image order differs from the consumer ISO.")]
+    [string]$ExpectedEdition,
+
     [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
     [string]$AccountSetup = 'auto-admin'
@@ -297,6 +300,56 @@ function Copy-WindowsFiles {
     Write-Log "File copy complete"
 }
 
+function Test-EditionNameMatch {
+    # Compares two edition names the way DISM actually spells them.
+    #
+    # The same SKU is named differently depending on the media: an LTSC 2021 ISO
+    # reports 'Windows 10 Enterprise LTSC 2021', while a caller naturally asks for
+    # 'Windows 10 Enterprise LTSC'. Stripping the 'Windows NN ' prefix and a
+    # trailing release year makes those equal.
+    #
+    # A substring test would NOT work here: 'Enterprise LTSC' is a substring of
+    # 'IoT Enterprise LTSC', so a lazy match would silently install the IoT image
+    # when the plain one was requested. The comparison is exact after normalizing.
+    #
+    # The family check is separate and just as important: without it a Windows 11
+    # ISO satisfies a Windows 10 request, because both normalize to the same SKU.
+    # It only applies when both names carry a family token.
+    param(
+        [Parameter(Mandatory=$true)][string]$Expected,
+        [Parameter(Mandatory=$false)][AllowEmptyString()][string]$Actual
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Expected) -or [string]::IsNullOrWhiteSpace($Actual)) {
+        return $false
+    }
+
+    $normalize = {
+        param([string]$Value)
+        $n = $Value.Trim().ToLowerInvariant()
+        $n = $n -replace '^windows\s+(?:10|11)\s+', ''
+        $n = $n -replace '\s+20\d{2}$', ''
+        $n = $n -replace '\s+', ' '
+        return $n.Trim()
+    }
+
+    if ((& $normalize $Expected) -ne (& $normalize $Actual)) { return $false }
+
+    $familyOf = {
+        param([string]$Value)
+        if ($Value -match '^\s*windows\s+(10|11)\b') { return $Matches[1] }
+        return ''
+    }
+
+    $expectedFamily = & $familyOf $Expected
+    $actualFamily = & $familyOf $Actual
+    if ($expectedFamily -and $actualFamily -and ($expectedFamily -ne $actualFamily)) {
+        return $false
+    }
+
+    return $true
+}
+
 function Resolve-ImageIndex {
     Write-Log "Resolving and validating image index $INDEX..."
     
@@ -319,9 +372,32 @@ function Resolve-ImageIndex {
         7 = "Windows 11 Pro N"
     }
     
-    $targetName = $expectedNames[$INDEX]
-    
-    if ($targetName) {
+    # LTSC media uses a completely different image order - three images for the
+    # Windows 11 LTSC 2024 ISO, two for Windows 10 LTSC 2021 - so the consumer map
+    # above is meaningless there. When the caller says which edition it wants,
+    # locate it by name and trust the ISO's index over the one we were handed.
+    # A missing edition is a hard failure: silently building a different SKU than
+    # the one requested is worse than not building at all.
+    if ($ExpectedEdition) {
+        $foundImage = $images |
+            Where-Object { Test-EditionNameMatch -Expected $ExpectedEdition -Actual $_.ImageName } |
+            Select-Object -First 1
+
+        if (-not $foundImage) {
+            Write-Log "Edition '$ExpectedEdition' is not present on this ISO. Images available:" "ERROR"
+            $images | ForEach-Object { Write-Log "  Index $($_.ImageIndex): $($_.ImageName)" "ERROR" }
+            throw "Expected edition '$ExpectedEdition' not found in $sourceImagePath"
+        }
+
+        if ($foundImage.ImageIndex -ne $INDEX) {
+            Write-Log "Index shifted! '$ExpectedEdition' is index $($foundImage.ImageIndex), not $INDEX. Using $($foundImage.ImageIndex)." "WARN"
+            $script:INDEX = $foundImage.ImageIndex
+        } else {
+            Write-Log "Edition '$ExpectedEdition' matched expected index $INDEX."
+        }
+    }
+    elseif ($expectedNames[$INDEX]) {
+        $targetName = $expectedNames[$INDEX]
         $foundImage = $images | Where-Object { $_.ImageName -eq $targetName }
         if ($foundImage) {
             $actualIndex = $foundImage.ImageIndex
@@ -335,7 +411,8 @@ function Resolve-ImageIndex {
         } else {
             Write-Log "Expected edition '$targetName' not found in ISO. Proceeding with literal index $INDEX." "WARN"
         }
-    } else {
+    }
+    else {
         Write-Log "No standard mapping for index $INDEX. Proceeding with literal index."
     }
     
