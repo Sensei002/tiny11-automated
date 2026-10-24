@@ -401,6 +401,7 @@ tiny11-automated/
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core (+ -GamingProfile)
 │   ├── nano11builder-headless.ps1        # ✨ Automated Nano
 │   ├── ltsc-edition-catalog.ps1          # 🏢 LTSC editions, indexes and slugs
+│   ├── apply-latest-lcu.ps1              # 🔄 Newest cumulative update, from the catalog
 │   ├── gaming-profile.ps1                # 🎮 Profile engine (dot-sourced)
 │   ├── essentials-profile.ps1            # 🎮 Debloat engine (always on for Core-Gaming)
 │   ├── gaming-firstboot.ps1              # 🎮 Runs once as SYSTEM on the target
@@ -429,6 +430,7 @@ tiny11-automated/
     -ISO <string>              # Drive letter of mounted ISO (e.g., "E")
     -INDEX <int>               # Image index (1=Home, 4=Education, 6=Pro, 7=Pro N)
     [-ExpectedEdition <string>]# 🏢 Resolve the index by image name instead (LTSC media)
+    [-UpdateToLatest]          # 🔄 Install the newest cumulative update before debloating
     [-SCRATCH <string>]        # Optional: Scratch disk (default: script directory)
     [-SkipCleanup]             # Optional: Keep temp files for debugging
     [-AccountSetup <string>]   # Optional: "auto-admin" (default) | "classic"
@@ -450,6 +452,42 @@ optional and defaults to the old fixed-index behaviour. See [LTSC.md](LTSC.md).
 
 `winre.wim` is always kept — there is no parameter to remove it. See
 *Install dies at ~10%* below for why.
+
+### 🔄 Staying on the latest build
+
+Microsoft's download page serves a static ISO: build 26300.9457 while Windows Update is
+already at 26300.9807. Every image built from that media ships weeks behind, missing the
+security fixes and the feature bits that arrive inside cumulative updates.
+
+`-UpdateToLatest` closes that gap without replacing the ISO pipeline. After the image is
+mounted, and before anything is removed, `scripts/apply-latest-lcu.ps1`:
+
+1. maps the image build to the catalog's product name (`26300` → `Windows 11, version 26H2`)
+2. asks the Microsoft Update Catalog for the newest cumulative update
+3. downloads it, plus the checkpoint prerequisite when the catalog lists one
+4. applies it with `DISM /Add-Package`
+5. re-reads the kernel version to prove the build actually moved
+
+It runs **before** the debloat passes, so the removals act on the final payload, and
+**before** `Optimize-WinSxS`, which deletes the servicing stack that `Add-Package` needs.
+All six build workflows expose it as `update_to_latest`, default on.
+
+Cost: roughly 5 GB of download and 20–40 minutes per build. That is not a small delta —
+Microsoft has shipped full-payload cumulative updates since 2023, so the `.msu` is
+around 4.5 GB on its own.
+
+It is best-effort by design. A missing update, a failed download, insufficient disk or a
+package the image rejects logs a warning and the build continues at its base build.
+Calling the script directly with `-RequireUpdate` makes any of those fatal.
+
+Two honest caveats:
+
+- **Core is non-serviceable either way.** Patching freezes 9807 into the image instead of
+  9457 — worth having, but it is a one-shot improvement, not ongoing servicing. Standard
+  and LTSC gain more, because those images stay serviceable.
+- **Not every build has a catalog entry.** Windows 10 LTSC 2021 updates are titled
+  "Windows 10 Version 21H2" and carry no build number, which the parser handles. An
+  unmapped build family is skipped with a warning rather than guessed at.
 
 ### Core-Gaming Parameters
 
@@ -985,6 +1023,7 @@ that matters.
 ### Workflow Features
 
 ✨ **Automated download** - Fetches ISO automatically  
+🔄 **Latest build** - Installs the newest cumulative update before debloating  
 🔐 **Checksum verification** - Validates ISO integrity  
 📢 **Discord notifications** - Real-time build status  
 📦 **Artifact upload** - ISO + checksums are kept for 7 days, even when SourceForge is configured  
@@ -1002,8 +1041,9 @@ repository secrets exist (**Settings → Secrets and variables → Actions**):
 | `SF_SSH_KEY` | **Base64** of the private SSH key registered on SourceForge |
 | `SF_PROJECT` | SourceForge project unixname, e.g. `tiny11-automated` (defaults to the repository name) |
 
-SourceForge does **not** accept the account password for SCP/SFTP — it requires an SSH
-key. Create one and register it:
+SourceForge accepts **either your account password or an SSH key** for SCP/SFTP — a
+password is fine for a desktop client like FileZilla. The workflows use a key, so that
+no password has to live in a repository secret. Create one and register it:
 
 ```bash
 ssh-keygen -t ed25519 -C "github-actions-tiny11" -f sf_key -N ""
@@ -1025,6 +1065,30 @@ To push the ISO from a run that already finished, without rebuilding it, run
 **Actions → Upload ISO to SourceForge** and enter that run's ID (or leave it blank to
 take the latest successful build of the selected workflow). GitHub keeps build
 artifacts for 7 days.
+
+#### Where releases land
+
+Each variant gets one folder, and every build of that variant is added to it. The
+folder is `<variant>-<edition>-<version>`; the ISO inside carries build, language and
+date, so a folder reads newest-last:
+
+| Workflow | Folder |
+|----------|--------|
+| Standard | `Tiny11-Pro-26H2` |
+| Core | `Tiny11Core-Pro-26H2` |
+| Core-Gaming | `Tiny11CoreGaming-Pro-26H2` |
+| Nano | `Nano11-Pro-26H2` |
+| LTSC | `Tiny11-LTSC-<edition>-<year>` |
+| Core LTSC | `Tiny11Core-LTSC-<edition>-<year>` |
+
+The build writes that folder name into the `<iso>.txt` verification file, and the
+backfill workflow reads it back. That is why a backfilled release lands in the same
+folder as a freshly built one instead of a folder named after the ISO.
+
+A folder holds **the ISO and `SOURCEFORGE_README.md`, nothing else**. The `.sha256`,
+`.md5` and `.txt` files are still generated and still published — as GitHub release
+assets and inside the workflow artifact — they are just not copied into the download
+folder, so a release folder reads as a plain list of images.
 
 ---
 

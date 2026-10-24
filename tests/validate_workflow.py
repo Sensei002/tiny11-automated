@@ -32,6 +32,15 @@ EXPECTED_NAME = "Build and Release Tiny11 Core-Gaming"
 EXPECTED_JOB = "build-tiny11-core-gaming"
 
 CATALOG = REPO_ROOT / "scripts" / "ltsc-edition-catalog.ps1"
+BACKFILL_WF = WORKFLOWS / "upload-iso-to-sourceforge.yml"
+BUILD_WORKFLOWS = [
+    "build-tiny11.yml",
+    "build-tiny11-core.yml",
+    "build-tiny11-core-gaming.yml",
+    "build-nano11.yml",
+    "build-tiny11-ltsc.yml",
+    "build-tiny11-core-ltsc.yml",
+]
 LTSC_WORKFLOWS = {
     "build-tiny11-ltsc.yml": {
         "name": "Build and Release Tiny11 LTSC",
@@ -224,6 +233,94 @@ def validate_ltsc_workflows() -> None:
             print("[FAIL] -ExpectedEdition is not passed")
 
 
+def validate_sourceforge_folders() -> None:
+    """One folder per variant, and the backfill must not invent a different one.
+
+    A release lands in a folder named after the variant, edition and version -
+    Tiny11-Pro-26H2, Tiny11Core-Pro-26H2, Tiny11CoreGaming-Pro-26H2. The backfill
+    workflow has no way to derive that from an ISO filename, so each build records
+    it in the verification file and the backfill reads it back.
+    """
+    print()
+    print("SourceForge folder placement")
+
+    expected_folders = {
+        "build-tiny11.yml": '"Tiny11-$edition-$version"',
+        "build-tiny11-core.yml": '"Tiny11Core-$edition-$version"',
+        "build-tiny11-core-gaming.yml": '"Tiny11CoreGaming-$edition-$version"',
+        "build-nano11.yml": '"Nano11-$edition-$version"',
+    }
+
+    for name in BUILD_WORKFLOWS:
+        path = WORKFLOWS / name
+        if not path.exists():
+            problems.append(f"missing {name}")
+            print(f"[FAIL] missing {name}")
+            continue
+
+        raw = path.read_text(encoding="utf-8")
+
+        if "Folder: $env:FOLDER_NAME" not in raw:
+            problems.append(f"{name} does not record its SourceForge folder")
+            print(f"[FAIL] {name} does not write 'Folder: $env:FOLDER_NAME'")
+        else:
+            print(f"[ok]   {name} records its folder")
+
+        if name in expected_folders:
+            pattern = expected_folders[name]
+            if pattern in raw:
+                print(f"[ok]   {name} folder is {pattern.strip(chr(34))}")
+            else:
+                problems.append(f"{name} no longer uses the {pattern} folder")
+                print(f"[FAIL] {name} does not use {pattern}")
+
+        # A release folder should read as a plain list of ISOs. The checksums and
+        # the verification file belong in the GitHub release and the artifact.
+        leaked = [
+            suffix
+            for suffix in (".sha256", ".md5", ".txt")
+            if f'Copy-Item "$env:ISO_NAME{suffix}" $env:FOLDER_NAME' in raw
+        ]
+        if leaked:
+            problems.append(f"{name} still publishes {', '.join(leaked)} to SourceForge")
+            print(f"[FAIL] {name} still copies {', '.join(leaked)} into the release folder")
+        else:
+            print(f"[ok]   {name} publishes only the ISO")
+
+    if not BACKFILL_WF.exists():
+        problems.append("missing upload-iso-to-sourceforge.yml")
+        print("[FAIL] missing upload-iso-to-sourceforge.yml")
+        return
+
+    raw = BACKFILL_WF.read_text(encoding="utf-8")
+
+    if "*.iso.txt" in raw and "Folder:" in raw:
+        print("[ok]   backfill reads the folder the build recorded")
+    else:
+        problems.append("backfill does not read the recorded folder")
+        print("[FAIL] backfill does not read 'Folder:' from the artifact")
+
+    if "A-Za-z0-9._-" in raw:
+        print("[ok]   backfill validates the folder name")
+    else:
+        problems.append("backfill does not validate the folder name")
+        print("[FAIL] backfill does not validate the folder name")
+
+    if 'mv -v "$iso" "$folder"/' in raw:
+        print("[ok]   backfill publishes only the ISO")
+    else:
+        problems.append("backfill copies more than the ISO into the release folder")
+        print("[FAIL] backfill should move only the ISO")
+
+    # The regression that produced a stray folder per backfilled release: falling
+    # back to the ISO stem silently. The fallback may exist, but must warn.
+    if 'folder="${iso_name%.iso}"' in raw and "::warning" in raw:
+        print("[ok]   ISO-stem fallback warns instead of guessing quietly")
+    else:
+        problems.append("ISO-stem fallback is silent or missing")
+        print("[FAIL] ISO-stem fallback must warn")
+
+
 def main() -> int:
     print("=" * 68)
     print("Workflow validation")
@@ -318,6 +415,7 @@ def main() -> int:
         print("[FAIL] profile validation should precede the ISO download")
 
     validate_ltsc_workflows()
+    validate_sourceforge_folders()
 
     print()
     print("=" * 68)

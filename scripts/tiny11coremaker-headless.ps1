@@ -128,6 +128,9 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Expected edition name, e.g. 'Windows 11 IoT Enterprise LTSC'. When set, -INDEX is treated as a hint: the image is located by name on the ISO and the index is corrected to match. Required for LTSC media, whose image order differs from the consumer ISO.")]
     [string]$ExpectedEdition,
 
+    [Parameter(Mandatory=$false, HelpMessage="Bring the mounted image up to the newest cumulative update Microsoft has published for its build, before any removal runs. Requires network access; a failed lookup or apply logs a warning and the build continues at its base build.")]
+    [switch]$UpdateToLatest,
+
     [Parameter(Mandatory=$false, HelpMessage="Enable .NET Framework 3.5")]
     [switch]$ENABLE_DOTNET35,
 
@@ -2040,6 +2043,51 @@ function Invoke-Cleanup {
 }
 
 
+function Invoke-ImageUpdate {
+    # Brings the mounted image up to the newest cumulative update Microsoft has
+    # published for its build.
+    #
+    # Placed before every removal on purpose: the debloat passes should act on the
+    # final payload, not on a superseded one. It must also run before
+    # Optimize-WinSxS, which deletes the servicing stack that Add-Package needs -
+    # applying an update afterwards cannot work.
+    #
+    # Best-effort by contract. A failed lookup, download or apply leaves the image
+    # at its base build and logs a warning, because losing a 60-minute build to a
+    # transient catalog error is worse than shipping an image one update behind.
+    if (-not $UpdateToLatest) { return }
+
+    $lcuScript = Join-Path $PSScriptRoot 'apply-latest-lcu.ps1'
+    if (-not (Test-Path -LiteralPath $lcuScript)) {
+        Write-Log "Update requested but apply-latest-lcu.ps1 is missing - skipping." "WARN"
+        return
+    }
+
+    $arch = if ($script:architecture -eq 'arm64') { 'arm64' } else { 'x64' }
+    $workDir = Join-Path $ScratchDisk 'tiny11-lcu'
+
+    Write-Log "Checking for a newer cumulative update (build $script:DetectedBuildNumber, $arch)..."
+
+    $outcome = $null
+    try {
+        $outcome = & $lcuScript -ImageDir $scratchDir -DownloadDir $workDir `
+            -ImageVersion $script:DetectedBuildNumber -Arch $arch -LogFile $logFile |
+            Select-Object -Last 1
+    } catch {
+        Write-Log "Update step failed: $_ - continuing at build $script:DetectedBuildNumber" "WARN"
+    }
+
+    if ($outcome -and $outcome.Applied) {
+        Write-Log "Image updated: $($outcome.Before) -> $($outcome.After) ($($outcome.Kb))" "SUCCESS"
+    } elseif ($outcome) {
+        Write-Log "Image kept at $($outcome.Before) (update skipped: $($outcome.Reason))" "WARN"
+    }
+
+    if (-not $SkipCleanup) {
+        Remove-Item -Path $workDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 #---------[ Main Execution ]---------
 try {
     Write-Log "=== Tiny11 Core Headless Builder Started ===" "INFO"
@@ -2094,6 +2142,10 @@ try {
 
     Mount-WindowsImageFile
     Get-ImageMetadata
+
+    # Bring the image up to date before anything is removed, so the debloat
+    # passes act on the final payload rather than a superseded one.
+    Invoke-ImageUpdate
 
     # Customization phase
     Remove-BloatwareApps

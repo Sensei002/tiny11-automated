@@ -129,12 +129,43 @@ jobs:
 
           iso_name=$(basename "$iso")
           folder="$FOLDER_INPUT"
+
+          # The build records its SourceForge folder in the verification file it
+          # ships beside the ISO (<iso>.txt). Read that rather than rebuilding the
+          # name from the filename: the build folder is <variant>-<edition>-<version>
+          # ('Tiny11Core-Pro-26H2') while the ISO is
+          # <variant>-<version>-<build>-<language>-<edition>-<date>, and guessing
+          # where the edition token sits is how the previous version of this step
+          # created a second folder for every backfilled release.
+          if [ -z "$folder" ]; then
+            meta=$(find incoming -maxdepth 1 -type f -name '*.iso.txt' -print -quit)
+            if [ -n "$meta" ]; then
+              folder=$(sed -n 's/^[[:space:]]*Folder:[[:space:]]*//p' "$meta" | head -n1 | tr -d '\r')
+              [ -n "$folder" ] && echo "Folder from $meta: $folder"
+            fi
+          fi
+
+          # Artifacts produced before the Folder line existed cannot say where they
+          # belong. Fall back to the ISO stem, but say so loudly - it is not the
+          # layout a normal build produces.
           if [ -z "$folder" ]; then
             folder="${iso_name%.iso}"
+            echo "::warning title=Folder guessed::The artifact has no 'Folder:' line, so '$folder' is a guess. Pass folder_name to place it in the variant folder."
+          fi
+
+          # The folder becomes a path and a remote SCP target, so it is checked
+          # rather than trusted.
+          if ! printf '%s' "$folder" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "::error::Refusing folder name '$folder' - only letters, digits, dot, dash and underscore are allowed."
+            exit 1
           fi
 
           mkdir -p "$folder"
-          cp -v incoming/* "$folder"/
+          # move, not copy: a 5 GB ISO duplicated in the workspace is 10 GB on a
+          # runner with roughly 14 GB free. Only the ISO is published, so the
+          # folder matches what a normal build uploads; the checksums stay in the
+          # artifact.
+          mv -v "$iso" "$folder"/
           if [ -f SOURCEFORGE_README.md ]; then
             cp -v SOURCEFORGE_README.md "$folder"/
           fi

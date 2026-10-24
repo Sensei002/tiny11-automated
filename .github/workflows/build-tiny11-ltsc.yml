@@ -52,6 +52,11 @@ on:
         options:
           - 'auto-admin'
           - 'classic'
+      update_to_latest:
+        description: 'Install the newest cumulative update Microsoft has published for this build before debloating, so the image is not stuck at the ISO build. Adds a ~5 GB download and 20-40 minutes.'
+        type: boolean
+        required: false
+        default: true
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -327,6 +332,13 @@ jobs:
             Write-Output "Cleanup will be skipped (debugging mode)"
           }
 
+          # Default on. An automation dispatch never sends this key, so compare
+          # against the literal "false" rather than testing for "true".
+          if ("${{ github.event.inputs.update_to_latest }}" -ne "false") {
+            $params.UpdateToLatest = $true
+            Write-Output "Will install the newest cumulative update before debloating"
+          }
+
           # Only fall back to the default when nothing was supplied, so the
           # builder's ValidateSet never receives an empty string.
           $accountSetup = "${{ github.event.inputs.account_setup }}"
@@ -426,6 +438,7 @@ jobs:
           Tiny11 ISO Verification
           ========================
           File: $isoName
+          Folder: $env:FOLDER_NAME
           Windows Build: $buildNumber
           Size: ${sizeGB}GB
           Build Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
@@ -598,10 +611,10 @@ jobs:
 
           # 2. Copy files into this folder
           # Note: Using Copy-Item instead of Move-Item so files remain for the GitHub Release step below
+          # Only the ISO is published to SourceForge, so a release folder is a plain
+          # list of images. The checksums and the verification file stay as GitHub
+          # release assets and in the workflow artifact.
           Copy-Item $env:ISO_NAME $env:FOLDER_NAME
-          Copy-Item "$env:ISO_NAME.sha256" $env:FOLDER_NAME
-          Copy-Item "$env:ISO_NAME.md5" $env:FOLDER_NAME
-          Copy-Item "$env:ISO_NAME.txt" $env:FOLDER_NAME
 
           # Copy SourceForge README
           if (Test-Path "SOURCEFORGE_README.md") {
