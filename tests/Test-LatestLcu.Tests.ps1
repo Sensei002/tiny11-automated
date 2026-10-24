@@ -315,3 +315,83 @@ Describe 'Workflow wiring' {
         $raw | Should -Match 'inputs\.update_to_latest \}\}" -ne "false"'
     }
 }
+
+Describe 'Latest-build guarantee' {
+
+    It 'declares -RequireLatestUpdate in the <Name> builder' -ForEach @(
+        @{ Name = 'Standard'; Path = 'scripts/tiny11maker-headless.ps1' }
+        @{ Name = 'Core'; Path = 'scripts/tiny11coremaker-headless.ps1' }
+        @{ Name = 'Nano'; Path = 'scripts/nano11builder-headless.ps1' }
+    ) {
+        $source = Get-Content -LiteralPath (Join-Path $repoRoot $Path) -Raw
+        $source | Should -Match '(?m)^\s*\[switch\]\$RequireLatestUpdate'
+    }
+
+    It 'publishes the build it actually produced, not the ISO it started from, in the <Name> builder' -ForEach @(
+        @{ Name = 'Standard'; Path = 'scripts/tiny11maker-headless.ps1' }
+        @{ Name = 'Core'; Path = 'scripts/tiny11coremaker-headless.ps1' }
+        @{ Name = 'Nano'; Path = 'scripts/nano11builder-headless.ps1' }
+    ) {
+        # Without this the filename, release tag and checksum names all carry the
+        # base build, so a patched 26300.9711 image ships labelled 26300.9457 and
+        # nothing downstream can tell the difference.
+        $source = Get-Content -LiteralPath (Join-Path $repoRoot $Path) -Raw
+        $source | Should -Match 'if \("\$\(\$outcome\.After\)" -match ''\(\\d\+\\\.\\d\+\)\$''\)'
+        $source | Should -Match '\$script:DetectedBuildNumber = \$Matches\[1\]'
+    }
+
+    It 'fails instead of shipping a stale image when the update is required, in the <Name> builder' -ForEach @(
+        @{ Name = 'Standard'; Path = 'scripts/tiny11maker-headless.ps1' }
+        @{ Name = 'Core'; Path = 'scripts/tiny11coremaker-headless.ps1' }
+        @{ Name = 'Nano'; Path = 'scripts/nano11builder-headless.ps1' }
+    ) {
+        $source = Get-Content -LiteralPath (Join-Path $repoRoot $Path) -Raw
+        $source | Should -Match 'throw "The image was not updated to the latest build'
+        $source | Should -Match 'throw "Could not update the image to the latest build'
+    }
+
+    It 'declares and forwards require_latest_update in <File>' -ForEach @(
+        @{ File = 'build-tiny11.yml' }
+        @{ File = 'build-tiny11-core.yml' }
+        @{ File = 'build-tiny11-core-gaming.yml' }
+        @{ File = 'build-nano11.yml' }
+        @{ File = 'build-tiny11-ltsc.yml' }
+        @{ File = 'build-tiny11-core-ltsc.yml' }
+    ) {
+        $raw = Get-Content -LiteralPath (Join-Path $workflowsDir $File) -Raw
+        $raw | Should -Match '(?m)^\s{6}require_latest_update:'
+        $raw | Should -Match '\$params\.RequireLatestUpdate = \$true'
+    }
+}
+
+Describe 'SourceForge upload resilience' {
+
+    It 'keeps the connection alive so a stall cannot hang the job, in <File>' -ForEach @(
+        @{ File = 'build-tiny11.yml' }
+        @{ File = 'build-tiny11-core.yml' }
+        @{ File = 'build-tiny11-core-gaming.yml' }
+        @{ File = 'build-nano11.yml' }
+        @{ File = 'build-tiny11-ltsc.yml' }
+        @{ File = 'build-tiny11-core-ltsc.yml' }
+    ) {
+        # A run sat on this step for 17 minutes having written zero bytes; without
+        # ServerAliveInterval scp waits for the job's 360-minute timeout.
+        $raw = Get-Content -LiteralPath (Join-Path $workflowsDir $File) -Raw
+        $raw | Should -Match "ServerAliveInterval=15"
+        $raw | Should -Match "ServerAliveCountMax=4"
+        $raw | Should -Match "ConnectTimeout=30"
+    }
+
+    It 'retries the upload once before failing, in <File>' -ForEach @(
+        @{ File = 'build-tiny11.yml' }
+        @{ File = 'build-tiny11-core.yml' }
+        @{ File = 'build-tiny11-core-gaming.yml' }
+        @{ File = 'build-nano11.yml' }
+        @{ File = 'build-tiny11-ltsc.yml' }
+        @{ File = 'build-tiny11-core-ltsc.yml' }
+    ) {
+        $raw = Get-Content -LiteralPath (Join-Path $workflowsDir $File) -Raw
+        $raw | Should -Match 'for \(\$attempt = 1; \$attempt -le 2; \$attempt\+\+\)'
+        $raw | Should -Match 'SCP Upload failed after 2 attempt'
+    }
+}

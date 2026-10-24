@@ -65,6 +65,9 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Bring the mounted image up to the newest cumulative update Microsoft has published for its build, before any removal runs. Requires network access; a failed lookup or apply logs a warning and the build continues at its base build.")]
     [switch]$UpdateToLatest,
 
+    [Parameter(Mandatory=$false, HelpMessage="Fail the build when the image cannot be brought up to the latest build, instead of continuing at the base build. Only meaningful together with -UpdateToLatest.")]
+    [switch]$RequireLatestUpdate,
+
     [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
     [string]$AccountSetup = 'auto-admin'
@@ -1171,15 +1174,31 @@ function Invoke-ImageUpdate {
     $outcome = $null
     try {
         $outcome = & $lcuScript -ImageDir $scratchDir -DownloadDir $workDir `
-            -ImageVersion $script:DetectedBuildNumber -Arch $arch -LogFile $logFile |
+            -ImageVersion $script:DetectedBuildNumber -Arch $arch -LogFile $logFile `
+            -RequireUpdate:$RequireLatestUpdate |
             Select-Object -Last 1
     } catch {
+        if ($RequireLatestUpdate) { throw "Could not update the image to the latest build: $_" }
         Write-Log "Update step failed: $_ - continuing at build $script:DetectedBuildNumber" "WARN"
     }
 
     if ($outcome -and $outcome.Applied) {
+        # Everything downstream - the ISO filename, the release tag, the checksum
+        # filenames - is derived from DetectedBuildNumber, which was read from the
+        # ISO *before* the update ran. Left alone, a patched image is published
+        # under the build number of the media it started from, which is how a
+        # 26300.9711 image ends up named 26300.9457.
+        if ("$($outcome.After)" -match '(\d+\.\d+)$') {
+            $script:DetectedBuildNumber = $Matches[1]
+        }
+        if (-not [string]::IsNullOrWhiteSpace("$($outcome.After)")) {
+            $script:DetectedFullVersion = "$($outcome.After)"
+        }
         Write-Log "Image updated: $($outcome.Before) -> $($outcome.After) ($($outcome.Kb))" "SUCCESS"
     } elseif ($outcome) {
+        if ($RequireLatestUpdate) {
+            throw "The image was not updated to the latest build (reason: $($outcome.Reason)). Set require_latest_update to false to allow a build at the base build."
+        }
         Write-Log "Image kept at $($outcome.Before) (update skipped: $($outcome.Reason))" "WARN"
     }
 

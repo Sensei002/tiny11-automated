@@ -112,6 +112,11 @@ on:
         type: boolean
         required: false
         default: true
+      require_latest_update:
+        description: 'Fail the build when the image cannot be brought up to the latest build, instead of publishing it at the ISO build. Untick to allow a possibly stale image.'
+        type: boolean
+        required: false
+        default: true
 
       # ---------------- Gaming profile groups ----------------
       hags:
@@ -639,6 +644,14 @@ jobs:
           if ("${{ github.event.inputs.update_to_latest }}" -ne "false") {
             $params.UpdateToLatest = $true
             Write-Output "Will install the newest cumulative update before debloating"
+
+            # The stage exists so that every published image is the current build,
+            # so a skipped update fails the build instead of quietly shipping the
+            # ISO's build. Untick require_latest_update for a deliberately stale one.
+            if ("${{ github.event.inputs.require_latest_update }}" -ne "false") {
+              $params.RequireLatestUpdate = $true
+              Write-Output "The build fails if the update cannot be applied"
+            }
           }
 
           $enableDotNet = [System.Boolean]::Parse("${{ github.event.inputs.enable_dotnet35 }}")
@@ -985,11 +998,30 @@ jobs:
 
           $remoteRoot = "$env:SF_USERNAME@frs.sourceforge.net:/home/frs/project/$env:SF_PROJECT/"
 
-          Write-Output "Uploading folder..."
-          scp -i $keyPath -r -o StrictHostKeyChecking=no $env:FOLDER_NAME $remoteRoot
+          # Keepalives, because a stalled connection otherwise hangs until the job
+          # timeout. An earlier run sat here for 17 minutes having written zero
+          # bytes and would have burned all 360. ServerAliveInterval=15 with
+          # CountMax=4 gives up on a dead peer in about a minute, and one retry
+          # covers the case where it was the connection rather than the file.
+          $scpOptions = @(
+            '-o', 'StrictHostKeyChecking=no',
+            '-o', 'ConnectTimeout=30',
+            '-o', 'ServerAliveInterval=15',
+            '-o', 'ServerAliveCountMax=4'
+          )
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "SCP Upload failed"
+          $scpExit = 1
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            Write-Output "Uploading folder (attempt $attempt of 2)..."
+            scp -i $keyPath -r @scpOptions $env:FOLDER_NAME $remoteRoot
+            $scpExit = $LASTEXITCODE
+            if ($scpExit -eq 0) { break }
+            Write-Output "SCP exited with $scpExit"
+            if ($attempt -lt 2) { Start-Sleep -Seconds 15 }
+          }
+
+          if ($scpExit -ne 0) {
+            Write-Error "SCP Upload failed after 2 attempt(s)"
             exit 1
           }
           Write-Output "Upload success!"
