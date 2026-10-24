@@ -667,7 +667,7 @@ jobs:
         shell: pwsh
         env:
           SF_USERNAME: ${{ secrets.SF_USERNAME }}
-          SF_PROJECT: ${{ secrets.SF_PROJECT }}
+          SF_PROJECT: ${{ secrets.SF_PROJECT || github.event.repository.name }}
           ISO_NAME: ${{ env.ISO_NAME }}
           FOLDER_NAME: ${{ env.FOLDER_NAME }}
         run: |
@@ -702,7 +702,7 @@ jobs:
           Write-Output "Upload success!"
 
           # 4. Set Download URL
-          $downloadUrl = "https://sourceforge.net/projects/$env:SF_PROJECT/files/$env:RELEASE_TAG/$env:ISO_NAME/download"
+          $downloadUrl = "https://sourceforge.net/projects/$env:SF_PROJECT/files/$env:FOLDER_NAME/$env:ISO_NAME/download"
           Add-Content -Path $env:GITHUB_ENV -Value "SF_DOWNLOAD_URL=$downloadUrl"
           
       - name: Cleanup SSH credentials
@@ -715,8 +715,7 @@ jobs:
             Write-Output "SSH key cleaned up"
           }
           
-      - name: Upload ISO as artifact (fallback)
-        if: env.DO_UPLOAD != 'true'
+      - name: Upload ISO as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ISO_NAME }}

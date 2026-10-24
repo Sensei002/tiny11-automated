@@ -1,0 +1,196 @@
+# Upload an already-built ISO artifact to SourceForge.
+#
+# The build workflows upload straight to SourceForge when the SF_* secrets are
+# configured. A run that finished before those secrets existed left its ISO only
+# as a GitHub artifact, and artifacts expire after 7 days. This workflow takes
+# that artifact and pushes it to SourceForge without rebuilding anything.
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SF_USERNAME  SourceForge login name
+#   SF_SSH_KEY   base64 of the PRIVATE SSH key registered on SourceForge
+#   SF_PROJECT   SourceForge project unixname (defaults to this repository name)
+#
+# SourceForge does not accept account passwords for SCP/SFTP; it requires an SSH
+# key. See "SourceForge upload setup" in README.md.
+
+name: Upload ISO to SourceForge
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID holding the ISO artifact (blank = latest successful build of the workflow below)'
+        required: false
+        default: ''
+      workflow:
+        description: 'Build workflow used when run_id is blank'
+        required: true
+        type: choice
+        default: 'build-tiny11-core-gaming.yml'
+        options:
+          - build-tiny11.yml
+          - build-tiny11-core.yml
+          - build-tiny11-core-gaming.yml
+          - build-nano11.yml
+          - build-tiny11-ltsc.yml
+          - build-tiny11-core-ltsc.yml
+      folder_name:
+        description: 'SourceForge folder (blank = derived from the ISO filename)'
+        required: false
+        default: ''
+
+permissions:
+  actions: read   # Read another run's artifacts
+  contents: read  # Checkout this repository
+
+concurrency:
+  group: sourceforge-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve the run and its ISO artifact
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID_INPUT: ${{ inputs.run_id }}
+          WORKFLOW_FILE: ${{ inputs.workflow }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPO"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+
+          run_id="$RUN_ID_INPUT"
+          if [ -z "$run_id" ]; then
+            run_id=$(curl -fsSL "${auth[@]}" \
+              "$api/actions/workflows/$WORKFLOW_FILE/runs?status=success&per_page=1" \
+              | jq -r '.workflow_runs[0].id // empty')
+            if [ -z "$run_id" ]; then
+              echo "::error::No successful run of $WORKFLOW_FILE was found."
+              exit 1
+            fi
+          fi
+
+          if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
+            echo "::error::run_id must be numeric, got '$run_id'."
+            exit 1
+          fi
+
+          run=$(curl -fsSL "${auth[@]}" "$api/actions/runs/$run_id")
+          conclusion=$(jq -r '.conclusion' <<<"$run")
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::Run $run_id concluded '$conclusion'; only successful runs are uploaded."
+            exit 1
+          fi
+
+          artifact=$(curl -fsSL "${auth[@]}" "$api/actions/runs/$run_id/artifacts?per_page=100" \
+            | jq -r '[.artifacts[] | select(.expired == false) | select(.name | endswith(".iso"))]
+                     | sort_by(.created_at) | last | .name // empty')
+          if [ -z "$artifact" ]; then
+            echo "::error::Run $run_id has no unexpired .iso artifact. Artifacts are kept for 7 days."
+            exit 1
+          fi
+
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          echo "Using artifact '$artifact' from run $run_id"
+
+      - name: Download the ISO artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.resolve.outputs.artifact }}
+          path: incoming
+          run-id: ${{ steps.resolve.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Stage the SourceForge folder
+        id: stage
+        env:
+          FOLDER_INPUT: ${{ inputs.folder_name }}
+        run: |
+          set -euo pipefail
+          iso=$(find incoming -maxdepth 1 -type f -name '*.iso' -print -quit)
+          if [ -z "$iso" ]; then
+            echo "::error::The artifact did not contain an .iso file."
+            find incoming -maxdepth 2 -type f
+            exit 1
+          fi
+
+          iso_name=$(basename "$iso")
+          folder="$FOLDER_INPUT"
+          if [ -z "$folder" ]; then
+            folder="${iso_name%.iso}"
+          fi
+
+          mkdir -p "$folder"
+          cp -v incoming/* "$folder"/
+          if [ -f SOURCEFORGE_README.md ]; then
+            cp -v SOURCEFORGE_README.md "$folder"/
+          fi
+
+          echo "iso_name=$iso_name" >> "$GITHUB_OUTPUT"
+          echo "folder=$folder" >> "$GITHUB_OUTPUT"
+          du -sh "$folder"
+
+      - name: Configure SSH for SourceForge
+        env:
+          SF_SSH_KEY: ${{ secrets.SF_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SF_SSH_KEY:-}" ]; then
+            echo "::error::SF_SSH_KEY is not set. Add the base64-encoded private key as a repository secret."
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          umask 077
+
+          # The repository stores the private key base64-encoded on one line, so a
+          # multiline PEM/OpenSSH key survives the secret editor intact.
+          printf '%s' "$SF_SSH_KEY" | base64 -d > ~/.ssh/sf_key
+          if ! ssh-keygen -y -f ~/.ssh/sf_key > /dev/null 2>&1; then
+            echo "::error::SF_SSH_KEY did not decode to a usable private key. It must be base64 of the whole key file, on one line, with no passphrase."
+            exit 1
+          fi
+
+          ssh-keyscan -t rsa,ecdsa,ed25519 frs.sourceforge.net >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/sf_key ~/.ssh/known_hosts
+
+      - name: Upload to SourceForge
+        env:
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+          SF_PROJECT: ${{ secrets.SF_PROJECT || github.event.repository.name }}
+          FOLDER: ${{ steps.stage.outputs.folder }}
+          ISO_NAME: ${{ steps.stage.outputs.iso_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SF_USERNAME:-}" ]; then
+            echo "::error::SF_USERNAME is not set."
+            exit 1
+          fi
+
+          remote="$SF_USERNAME@frs.sourceforge.net:/home/frs/project/$SF_PROJECT/"
+          echo "Uploading $FOLDER to $remote"
+          scp -i ~/.ssh/sf_key -r -o StrictHostKeyChecking=yes "$FOLDER" "$remote"
+
+          url="https://sourceforge.net/projects/$SF_PROJECT/files/$FOLDER/$ISO_NAME/download"
+          {
+            echo "### Uploaded to SourceForge"
+            echo ""
+            echo "[$ISO_NAME]($url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the SSH key
+        if: always()
+        run: rm -f ~/.ssh/sf_key

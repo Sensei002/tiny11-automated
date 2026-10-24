@@ -585,7 +585,7 @@ jobs:
         shell: pwsh
         env:
           SF_USERNAME: ${{ secrets.SF_USERNAME }}
-          SF_PROJECT: ${{ secrets.SF_PROJECT }}
+          SF_PROJECT: ${{ secrets.SF_PROJECT || github.event.repository.name }}
           ISO_NAME: ${{ env.ISO_NAME }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
@@ -637,8 +637,7 @@ jobs:
             Write-Output "SSH key cleaned up"
           }
           
-      - name: Upload ISO as artifact (fallback)
-        if: env.DO_UPLOAD != 'true'
+      - name: Upload ISO as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ISO_NAME }}

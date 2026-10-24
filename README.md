@@ -987,9 +987,44 @@ that matters.
 ✨ **Automated download** - Fetches ISO automatically  
 🔐 **Checksum verification** - Validates ISO integrity  
 📢 **Discord notifications** - Real-time build status  
-📦 **Artifact upload** - ISO + checksums available  
+📦 **Artifact upload** - ISO + checksums are kept for 7 days, even when SourceForge is configured  
 🚀 **SourceForge deployment** - Automatic release distribution  
 📊 **Build statistics** - Performance metrics tracked
+
+### 🔑 SourceForge upload setup
+
+Every build workflow uploads its finished ISO straight to SourceForge once these
+repository secrets exist (**Settings → Secrets and variables → Actions**):
+
+| Secret | Value |
+|--------|-------|
+| `SF_USERNAME` | Your SourceForge login name |
+| `SF_SSH_KEY` | **Base64** of the private SSH key registered on SourceForge |
+| `SF_PROJECT` | SourceForge project unixname, e.g. `tiny11-automated` (defaults to the repository name) |
+
+SourceForge does **not** accept the account password for SCP/SFTP — it requires an SSH
+key. Create one and register it:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-tiny11" -f sf_key -N ""
+# Add the PUBLIC key at https://sourceforge.net/auth/shell_services
+# Then encode the PRIVATE key as one line for the SF_SSH_KEY secret:
+base64 -w0 sf_key            # Linux
+base64 -i sf_key             # macOS
+```
+
+On Windows PowerShell:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("sf_key"))
+```
+
+Paste that single line into `SF_SSH_KEY`. Never commit `sf_key` or its Base64 form.
+
+To push the ISO from a run that already finished, without rebuilding it, run
+**Actions → Upload ISO to SourceForge** and enter that run's ID (or leave it blank to
+take the latest successful build of the selected workflow). GitHub keeps build
+artifacts for 7 days.
 
 ---
 
