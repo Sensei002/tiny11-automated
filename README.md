@@ -470,15 +470,23 @@ mounted, and before anything is removed, `scripts/apply-latest-lcu.ps1`:
 
 It runs **before** the debloat passes, so the removals act on the final payload, and
 **before** `Optimize-WinSxS`, which deletes the servicing stack that `Add-Package` needs.
-All six build workflows expose it as `update_to_latest`, default on.
+All six build workflows expose it as `update_to_latest`, a tri-state
+(`required` / `best-effort` / `off`) that defaults to `required`.
 
-Cost: roughly 5 GB of download and 20–40 minutes per build. That is not a small delta —
+- `required` (default) — the build fails if the update cannot be applied, so a published
+  image is always the current build.
+- `best-effort` — same download and apply, but a failed update publishes the image at its
+  base build instead of failing.
+- `off` — skip the cumulative update entirely.
+
+Cost: roughly 5 GB of download and 20–40 minutes per build (except `off`). That is not a
+small delta —
 Microsoft has shipped full-payload cumulative updates since 2023, so the `.msu` is
 around 4.5 GB on its own.
 
-It is best-effort by design. A missing update, a failed download, insufficient disk or a
-package the image rejects logs a warning and the build continues at its base build.
-Calling the script directly with `-RequireUpdate` makes any of those fatal.
+`required` makes a missing update, a failed download, insufficient disk or a package the
+image rejects fatal. `best-effort` logs a warning and the build continues at its base
+build. Calling the script directly with `-RequireUpdate` is the same as `required`.
 
 Two honest caveats:
 

@@ -321,6 +321,45 @@ def validate_sourceforge_folders() -> None:
         print("[FAIL] ISO-stem fallback must warn")
 
 
+def validate_dispatch_input_counts() -> None:
+    """No build workflow may exceed GitHub's 25 workflow_dispatch input limit.
+
+    GitHub silently refuses to parse a workflow_dispatch event that declares more
+    than 25 top-level inputs. The file then falls back to being named after its
+    *path* in the Actions UI and runs as a 0-job failure on the default branch,
+    which is exactly the "workflow shows as the file path and the run failed" bug
+    that bit the Core-Gaming workflow when two update booleans were added on top
+    of its 24 gaming inputs. Catching the count here keeps that from ever
+    regressing.
+    """
+    print()
+    print("workflow_dispatch input counts")
+
+    limit = 25
+    for name in BUILD_WORKFLOWS:
+        path = WORKFLOWS / name
+        if not path.exists():
+            problems.append(f"missing {name}")
+            print(f"[FAIL] missing {name}")
+            continue
+
+        try:
+            doc = load_yaml(path)
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"{name} is not valid YAML: {exc}")
+            print(f"[FAIL] not valid YAML: {exc}")
+            continue
+
+        count = len(inputs_of(doc))
+        if count > limit:
+            problems.append(
+                f"{name} declares {count} workflow_dispatch inputs, limit is {limit}"
+            )
+            print(f"[FAIL] {count} inputs (> {limit}) - GitHub will not parse it")
+        else:
+            print(f"[ok]   {name}: {count} input(s) (limit {limit})")
+
+
 def main() -> int:
     print("=" * 68)
     print("Workflow validation")
@@ -416,6 +455,7 @@ def main() -> int:
 
     validate_ltsc_workflows()
     validate_sourceforge_folders()
+    validate_dispatch_input_counts()
 
     print()
     print("=" * 68)

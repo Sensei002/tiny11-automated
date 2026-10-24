@@ -66,15 +66,14 @@ on:
           - 'auto-admin'
           - 'classic'
       update_to_latest:
-        description: 'Install the newest cumulative update Microsoft has published for this build before debloating, so the image is not stuck at the ISO build. Adds a ~5 GB download and 20-40 minutes.'
-        type: boolean
+        description: 'Install the newest cumulative update Microsoft has published for this build before debloating, so the image is not stuck at the ISO build. "required" fails the build if the update cannot be applied, "best-effort" publishes the image at the ISO build instead, and "off" skips the update entirely. Adds a ~5 GB download and 20-40 minutes.'
+        type: choice
         required: false
-        default: true
-      require_latest_update:
-        description: 'Fail the build when the image cannot be brought up to the latest build, instead of publishing it at the ISO build. Untick to allow a possibly stale image.'
-        type: boolean
-        required: false
-        default: true
+        default: 'required'
+        options:
+          - 'required'
+          - 'best-effort'
+          - 'off'
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -400,16 +399,18 @@ jobs:
             Write-Output "Cleanup will be skipped (debugging mode)"
           }
 
-          # Default on. An automation dispatch never sends this key, so compare
-          # against the literal "false" rather than testing for "true".
-          if ("${{ github.event.inputs.update_to_latest }}" -ne "false") {
+          # One tri-state input instead of two booleans, because GitHub allows at
+          # most 25 workflow_dispatch inputs and the Core-Gaming workflow was
+          # already at the cap. "required" is the default, so a published image
+          # is always the current build.
+          $updateMode = "${{ github.event.inputs.update_to_latest }}"
+          if ([string]::IsNullOrWhiteSpace($updateMode)) { $updateMode = 'required' }
+          if ($updateMode -eq 'off') {
+            Write-Output "Skipping the cumulative update (update_to_latest = off)"
+          } else {
             $params.UpdateToLatest = $true
-            Write-Output "Will install the newest cumulative update before debloating"
-
-            # The stage exists so that every published image is the current build,
-            # so a skipped update fails the build instead of quietly shipping the
-            # ISO's build. Untick require_latest_update for a deliberately stale one.
-            if ("${{ github.event.inputs.require_latest_update }}" -ne "false") {
+            Write-Output "Will install the newest cumulative update before debloating (mode: $updateMode)"
+            if ($updateMode -eq 'required') {
               $params.RequireLatestUpdate = $true
               Write-Output "The build fails if the update cannot be applied"
             }

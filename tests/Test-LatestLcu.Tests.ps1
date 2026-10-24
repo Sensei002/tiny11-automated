@@ -288,7 +288,7 @@ Describe 'Workflow wiring' {
         $raw | Should -Match '\$params\.UpdateToLatest = \$true'
     }
 
-    It 'defaults the input to on in <File>' -ForEach @(
+    It 'defaults the input to required (update on) in <File>' -ForEach @(
         @{ File = 'build-tiny11.yml' }
         @{ File = 'build-tiny11-core.yml' }
         @{ File = 'build-tiny11-core-gaming.yml' }
@@ -296,9 +296,15 @@ Describe 'Workflow wiring' {
         @{ File = 'build-tiny11-ltsc.yml' }
         @{ File = 'build-tiny11-core-ltsc.yml' }
     ) {
+        # "required" is the default mode, so a published image is always the
+        # current build. An automation dispatch that omits the key gets this.
         $raw = Get-Content -LiteralPath (Join-Path $workflowsDir $File) -Raw
         $block = [regex]::Match($raw, '(?ms)^\s{6}update_to_latest:.*?(?=^\s{6}\w|\z)').Value
-        $block | Should -Match 'default:\s*true'
+        $block | Should -Match "default:\s*'required'"
+        $block | Should -Match "options:"
+        $block | Should -Match "- 'required'"
+        $block | Should -Match "- 'best-effort'"
+        $block | Should -Match "- 'off'"
     }
 
     It 'lets an automation dispatch keep the default in <File>' -ForEach @(
@@ -310,9 +316,10 @@ Describe 'Workflow wiring' {
         @{ File = 'build-tiny11-core-ltsc.yml' }
     ) {
         # The version-matrix workflow dispatches builds without this key, and an
-        # omitted boolean must mean "on" rather than "off".
+        # omitted value must degrade to "required" (update on) rather than off.
         $raw = Get-Content -LiteralPath (Join-Path $workflowsDir $File) -Raw
-        $raw | Should -Match 'inputs\.update_to_latest \}\}" -ne "false"'
+        $raw | Should -Match 'github\.event\.inputs\.update_to_latest \}\}"'
+        $raw | Should -Match 'IsNullOrWhiteSpace\(\$updateMode\)'
     }
 }
 
@@ -350,7 +357,7 @@ Describe 'Latest-build guarantee' {
         $source | Should -Match 'throw "Could not update the image to the latest build'
     }
 
-    It 'declares and forwards require_latest_update in <File>' -ForEach @(
+    It 'forwards -RequireLatestUpdate when the mode is required in <File>' -ForEach @(
         @{ File = 'build-tiny11.yml' }
         @{ File = 'build-tiny11-core.yml' }
         @{ File = 'build-tiny11-core-gaming.yml' }
@@ -358,9 +365,13 @@ Describe 'Latest-build guarantee' {
         @{ File = 'build-tiny11-ltsc.yml' }
         @{ File = 'build-tiny11-core-ltsc.yml' }
     ) {
+        # The two update booleans were collapsed into one tri-state
+        # (required / best-effort / off). "required" is the default, so the
+        # fail-if-not-updated behaviour still ships by default; it is now gated
+        # on the mode rather than a second input.
         $raw = Get-Content -LiteralPath (Join-Path $workflowsDir $File) -Raw
-        $raw | Should -Match '(?m)^\s{6}require_latest_update:'
         $raw | Should -Match '\$params\.RequireLatestUpdate = \$true'
+        $raw | Should -Match '\$updateMode -eq ''required'''
     }
 }
 
