@@ -101,7 +101,17 @@ function Expand-RepoArchive {
     )
 
     $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("tiny11-unpack-" + [guid]::NewGuid().ToString('N'))
-    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $staging -Force
+
+    # Expand-Archive writes a progress bar straight to the host, which turns a
+    # one-line install into hundreds of lines of redraws in a console or in a
+    # captured log.
+    $previousProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $staging -Force
+    } finally {
+        $ProgressPreference = $previousProgress
+    }
 
     $roots = @(Get-ChildItem -LiteralPath $staging -Directory)
     if ($roots.Count -ne 1) {

@@ -736,6 +736,7 @@ jobs:
             ${{ env.ISO_NAME }}.sha256
             ${{ env.ISO_NAME }}.md5
             ${{ env.ISO_NAME }}.txt
+            tiny11.ps1
           
       - name: Workflow summary
         shell: pwsh

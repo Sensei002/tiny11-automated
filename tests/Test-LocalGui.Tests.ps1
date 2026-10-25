@@ -391,7 +391,9 @@ Describe 'Window markup' {
 
 Describe 'Installer helpers' {
     BeforeAll {
-        . (Join-Path $localDir 'install.ps1')
+        # The installer sits at the repo root so the release asset can be published
+        # as tiny11.ps1, which is the name the documented one-liner asks for.
+        . (Join-Path $repoRoot 'tiny11.ps1')
     }
 
     It 'builds a codeload URL for a ref' {

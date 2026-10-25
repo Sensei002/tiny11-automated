@@ -456,6 +456,56 @@ def validate_local_build_profiles() -> None:
         print(f"[ok]   {vid}: {detail} match {workflow}")
 
 
+def validate_installer_asset() -> None:
+    """Every build release must attach tiny11.ps1.
+
+    The documented install is
+    `irm .../releases/latest/download/tiny11.ps1 | iex`, and `latest` resolves to
+    whichever release is newest - so a release that omits the asset breaks the
+    install for everyone until the next build, with a bare 404 and no message.
+
+    Checked here rather than in Pester because it lives in the release step's
+    `with.files` block, which only a YAML parser can see.
+    """
+    print()
+    print("installer asset")
+
+    for name in BUILD_WORKFLOWS:
+        path = WORKFLOWS / name
+        if not path.exists():
+            continue
+
+        try:
+            doc = load_yaml(path)
+        except Exception:  # noqa: BLE001
+            # Already reported by validate_dispatch_input_counts.
+            continue
+
+        found = False
+        attached = False
+        for job in (doc.get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                uses = str(step.get("uses") or "")
+                if "action-gh-release" not in uses:
+                    continue
+                found = True
+                files = str((step.get("with") or {}).get("files") or "")
+                if "tiny11.ps1" in files.split():
+                    attached = True
+
+        if not found:
+            problems.append(f"{name} has no release step to attach tiny11.ps1 to")
+            print("[FAIL] no release step")
+            continue
+
+        if not attached:
+            problems.append(f"{name} does not attach tiny11.ps1 to its release")
+            print("[FAIL] tiny11.ps1 is not attached to the release")
+            continue
+
+        print("[ok]   release attaches tiny11.ps1")
+
+
 def main() -> int:
     print("=" * 68)
     print("Workflow validation")
@@ -553,6 +603,7 @@ def main() -> int:
     validate_sourceforge_folders()
     validate_dispatch_input_counts()
     validate_local_build_profiles()
+    validate_installer_asset()
 
     print()
     print("=" * 68)
