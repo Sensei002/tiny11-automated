@@ -415,6 +415,16 @@ def _build_extra_fields(data: Dict) -> Optional[List[Dict]]:
 def main():
     """CLI interface for Discord notifications"""
 
+    # GitHub Actions Windows runners default stdout/stderr to cp1252, which cannot
+    # encode the emoji used in status messages (e.g. the "no webhook" warning). Force
+    # UTF-8 so those prints never raise UnicodeEncodeError. Best-effort: some stream
+    # wrappers (piped/captured) lack reconfigure.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
     parser = argparse.ArgumentParser(description='Send Discord notifications')
     parser.add_argument(
         '--webhook',

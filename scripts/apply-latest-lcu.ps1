@@ -381,20 +381,44 @@ function Get-CatalogDownloadUrls {
 function Get-MountedImageVersion {
     <#
     .SYNOPSIS
-        Reads the image build straight off the kernel binary.
+        Reads the image build from DISM (the mounted-image OS version).
 
     .DESCRIPTION
-        Cheaper and more reliable than parsing DISM output: the kernel's file
-        version is replaced by every cumulative update, so it is the value that
-        proves the package actually landed.
+        DISM reports the image's real OS build (e.g. 10.0.26300.9457), which is the
+        authoritative value for choosing the correct cumulative-update family and for
+        verifying the update landed. Reading the kernel binary's ProductVersion is NOT
+        reliable: on some 26H2 media the kernel resource is still stamped with the
+        24H2 build (10.0.26100.x), which would make us query the 24H2 catalog,
+        download the 26100 CU and have DISM reject it (exit 552 / 0x80070228).
     #>
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    $kernel = Join-Path $Path 'Windows\System32\ntoskrnl.exe'
-    if (-not (Test-Path -LiteralPath $kernel)) { return '' }
+    # DISM is the source of truth for the mounted image's OS version.
+    try {
+        $mounted = Get-WindowsImage -Mounted -ErrorAction Stop |
+            Where-Object { $_.MountPath -and ($_.MountPath.TrimEnd('\') -ieq $Path.TrimEnd('\')) } |
+            Select-Object -First 1
+        if ($mounted -and $mounted.ImageVersion) {
+            $version = $mounted.ImageVersion.ToString()
+            if ($version -match '(\d+\.\d+\.\d+\.\d+)') {
+                # Normalise "10.0.26300.9457" -> "26300.9457" to match the caller's
+                # convention (DetectedBuildNumber carries no "10.0." prefix).
+                return $Matches[1] -replace '^10\.0\.', ''
+            }
+        }
+    } catch {
+        Write-LcuLog "Get-WindowsImage -Mounted failed ($_); falling back to the kernel version." 'WARN'
+    }
 
-    $version = (Get-Item -LiteralPath $kernel).VersionInfo.ProductVersion
-    if ($version -match '(\d+\.\d+\.\d+\.\d+)') { return $Matches[1] }
+    # Fallback: kernel binary version. Known to mis-report the family on 26H2 media
+    # (kernel stamped 26100 while the OS is 26300), so only use it when DISM is
+    # unavailable.
+    $kernel = Join-Path $Path 'Windows\System32\ntoskrnl.exe'
+    if (Test-Path -LiteralPath $kernel) {
+        $version = (Get-Item -LiteralPath $kernel).VersionInfo.ProductVersion
+        if ($version -match '(\d+\.\d+\.\d+\.\d+)') { return $Matches[1] }
+    }
+
     return ''
 }
 
@@ -491,8 +515,16 @@ function Invoke-LatestLcuUpdate {
         throw "Mounted image not found at $Path."
     }
 
-    $before = Get-MountedImageVersion -Path $Path
-    if ([string]::IsNullOrWhiteSpace($before) -and $Version) { $before = $Version }
+    # The caller already resolved the image's real build from DISM and passed it as
+    # -Version (e.g. 26300.9457). Trust that over a disk read: on some 26H2 media the
+    # kernel binary is still stamped 26100, which would select the wrong update family
+    # and have DISM reject the package. Get-MountedImageVersion is still used for the
+    # -after verification, and as a fallback when -Version is not supplied.
+    if ($Version) {
+        $before = $Version
+    } else {
+        $before = Get-MountedImageVersion -Path $Path
+    }
     $result.Before = $before
 
     $family = Get-BuildFamily -Version $before

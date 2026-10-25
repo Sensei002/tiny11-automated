@@ -406,3 +406,64 @@ Describe 'SourceForge upload resilience' {
         $raw | Should -Match 'SCP Upload failed after 2 attempt'
     }
 }
+
+Describe 'Mounted-image version detection' {
+
+    BeforeAll {
+        # Make Get-WindowsImage present so it can be mocked both on a host without the
+        # Dism module (a local / non-Windows test runner) and on a Windows runner.
+        if (-not (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue)) {
+            function Get-WindowsImage { param([switch]$Mounted) }
+        }
+    }
+
+    It 'reads the DISM build (26300.9457), not the misstamped kernel, for 26H2 media' {
+        # This is the exact regression from run #40133719975: the kernel on the
+        # 26H2 ISO reports 26100.9457, so a kernel read selects the 24H2 catalog and
+        # DISM rejects the package (exit 552 / 0x80070228).
+        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith {
+            return @(
+                [pscustomobject]@{ MountPath = 'C:\mount'; ImageVersion = [version]'10.0.26300.9457' }
+            )
+        }
+        Get-MountedImageVersion -Path 'C:\mount' | Should -Be '26300.9457'
+    }
+
+    It 'matches by mount path and ignores other mounted images' {
+        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith {
+            return @(
+                [pscustomobject]@{ MountPath = 'C:\other'; ImageVersion = [version]'10.0.26100.1742' }
+                [pscustomobject]@{ MountPath = 'C:\mount'; ImageVersion = [version]'10.0.26300.9457' }
+            )
+        }
+        Get-MountedImageVersion -Path 'C:\mount' | Should -Be '26300.9457'
+    }
+
+    It 'falls back to the kernel when DISM reports nothing' {
+        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith { return @() }
+        # No real kernel on the fake path, so it returns empty rather than throwing.
+        Get-MountedImageVersion -Path 'C:\nope' | Should -Be ''
+    }
+
+    It 'returns empty when DISM throws and no kernel exists' {
+        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith { throw 'boom' }
+        Get-MountedImageVersion -Path 'C:\nope' | Should -Be ''
+    }
+}
+
+Describe 'LCU version selection' {
+
+    BeforeAll {
+        $lcuSource = Get-Content -LiteralPath $lcuPath -Raw
+    }
+
+    It 'prefers the caller-supplied -Version for the before-build (26H2-safe)' {
+        # Without this the kernel read returns 26100 on 26H2 media and the wrong CU
+        # family is selected.
+        $lcuSource | Should -Match '\$before = \$Version'
+    }
+
+    It 'reads the mounted build from DISM, not the kernel, to pick the update family' {
+        $lcuSource | Should -Match 'Get-WindowsImage -Mounted'
+    }
+}
