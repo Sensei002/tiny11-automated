@@ -140,7 +140,19 @@ Perfect for beginners and automated deployments:
 
 **Build time**: 30-80 minutes depending on variant
 
-### Option 2: Manual Build (PowerShell)
+### Option 2: One-Line Install (Local Builder GUI)
+
+The quickest local build. One command downloads the Tiny11 Local Builder GUI and launches it — no clone, no manual setup:
+
+```powershell
+irm https://github.com/Sensei002/tiny11-automated/releases/latest/download/tiny11.ps1 | iex
+```
+
+The GUI relaunches itself elevated (only the DISM imaging needs an admin token — the ISO download does not), then walks the build end to end: it **auto-downloads a fresh Windows 11 ISO from Microsoft**, **downloads and injects the latest cumulative update**, applies the Tiny11 treatment, and writes the finished ISO to the folder you pick.
+
+**Requires**: Windows 10/11, PowerShell 5.1+, ~30 GB free disk, an internet connection.
+
+### Option 3: Manual Build (PowerShell)
 
 For advanced users and local builds:
 

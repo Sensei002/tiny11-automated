@@ -265,6 +265,8 @@ $xaml = @'
       <Setter Property="Background" Value="{StaticResource Card}"/>
       <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="CaretBrush" Value="{StaticResource Accent}"/>
+      <Setter Property="SelectionBrush" Value="{StaticResource Accent}"/>
+      <Setter Property="SelectionOpacity" Value="0.35"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
       <Setter Property="Padding" Value="10,7"/>
@@ -276,7 +278,12 @@ $xaml = @'
           <ControlTemplate TargetType="TextBox">
             <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
-              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+              <!-- Foreground is bound onto the content host on purpose: a bare
+                   PART_ContentHost ScrollViewer does not reliably inherit the
+                   TextBox's Foreground for the text it renders, which left typed
+                   text black on the dark card. -->
+              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"
+                            Foreground="{TemplateBinding Foreground}"/>
             </Border>
           </ControlTemplate>
         </Setter.Value>
