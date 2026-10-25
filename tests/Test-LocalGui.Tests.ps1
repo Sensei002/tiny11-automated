@@ -421,7 +421,9 @@ Describe 'Installer helpers' {
     It 'tolerates a missing hash but says so' {
         $file = Join-Path $TestDrive 'payload3.bin'
         Set-Content -LiteralPath $file -Value 'hello' -NoNewline -Encoding ASCII
-        $output = Assert-ArchiveHash -Path $file -Expected ''
+        # Informational output goes to the host so the function's return value stays
+        # clean, hence the information-stream redirect.
+        $output = Assert-ArchiveHash -Path $file -Expected '' 6>&1
         ($output -join ' ') | Should -Match 'skipping verification'
     }
 }

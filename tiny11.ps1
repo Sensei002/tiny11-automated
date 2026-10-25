@@ -76,7 +76,7 @@ function Assert-ArchiveHash {
     )
 
     if ([string]::IsNullOrWhiteSpace($Expected)) {
-        Write-Output 'No SHA256 supplied - skipping verification. Pass -Sha256 to pin this install.'
+        Write-Host 'No SHA256 supplied - skipping verification. Pass -Sha256 to pin this install.'
         return
     }
 
@@ -87,7 +87,7 @@ function Assert-ArchiveHash {
         throw "Archive hash mismatch.`n  expected: $wanted`n  actual:   $actual"
     }
 
-    Write-Output 'Archive hash verified.'
+    Write-Host 'Archive hash verified.'
 }
 
 function Expand-RepoArchive {
@@ -102,16 +102,9 @@ function Expand-RepoArchive {
 
     $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("tiny11-unpack-" + [guid]::NewGuid().ToString('N'))
 
-    # Expand-Archive writes a progress bar straight to the host, which turns a
-    # one-line install into hundreds of lines of redraws in a console or in a
-    # captured log.
-    $previousProgress = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-    try {
-        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $staging -Force
-    } finally {
-        $ProgressPreference = $previousProgress
-    }
+    # The progress bar is suppressed by the caller, at global scope - see the note in
+    # Install-Tiny11LocalBuilder for why a local preference does not reach this cmdlet.
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $staging -Force
 
     $roots = @(Get-ChildItem -LiteralPath $staging -Directory)
     if ($roots.Count -ne 1) {
@@ -147,22 +140,27 @@ function Install-Tiny11LocalBuilder {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
     $url = Get-ArchiveUrl -Owner $Owner -Repo $Repo -Ref $Ref
-    Write-Output "Downloading $url"
+    Write-Host "Downloading $url"
 
-    $archive = Join-Path ([System.IO.Path]::GetTempPath()) ("tiny11-" + [guid]::NewGuid().ToString('N') + '.zip')
-    $previous = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
+    # Suppressed at global scope on purpose. Invoke-WebRequest and Expand-Archive both
+    # live in modules, and a module resolves $ProgressPreference through its own
+    # session state down to global - a function-local value never reaches it, so the
+    # bars keep printing. Restored afterwards so dot-sourcing this in a test session
+    # does not change the caller's preference.
+    $previousProgress = $global:ProgressPreference
+    $global:ProgressPreference = 'SilentlyContinue'
     try {
+        $archive = Join-Path ([System.IO.Path]::GetTempPath()) ("tiny11-" + [guid]::NewGuid().ToString('N') + '.zip')
         Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
-    } finally {
-        $ProgressPreference = $previous
-    }
 
-    try {
-        Assert-ArchiveHash -Path $archive -Expected $Sha256
-        Expand-RepoArchive -ArchivePath $archive -Destination $InstallDir | Out-Null
+        try {
+            Assert-ArchiveHash -Path $archive -Expected $Sha256
+            Expand-RepoArchive -ArchivePath $archive -Destination $InstallDir | Out-Null
+        } finally {
+            Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+        }
     } finally {
-        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+        $global:ProgressPreference = $previousProgress
     }
 
     $gui = Join-Path $InstallDir 'local\gui.ps1'
@@ -170,11 +168,11 @@ function Install-Tiny11LocalBuilder {
         throw "The archive did not contain local\gui.ps1 - is '$Ref' the right ref?"
     }
 
-    Write-Output "Installed to $InstallDir"
+    Write-Host "Installed to $InstallDir"
 
     if ($NoLaunch) { return $InstallDir }
 
-    Write-Output 'Starting the builder - it will ask for administrator rights.'
+    Write-Host 'Starting the builder - it will ask for administrator rights.'
     $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
     Start-Process $shell -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $gui)
 
