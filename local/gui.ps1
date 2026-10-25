@@ -262,6 +262,11 @@ $xaml = @'
     </Style>
 
     <Style x:Key="TxtInput" TargetType="TextBox">
+      <!-- No custom ControlTemplate on purpose. On .NET Framework a retemplated
+           TextBox whose PART_ContentHost is wrapped in a Border paints its glyphs
+           black and ignores Foreground (verified by screen capture); the stock
+           template honours Foreground, so the text renders in the light Ink.
+           Trade-off: square corners instead of rounded. -->
       <Setter Property="Background" Value="{StaticResource Card}"/>
       <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="CaretBrush" Value="{StaticResource Accent}"/>
@@ -273,21 +278,6 @@ $xaml = @'
       <Setter Property="Height" Value="34"/>
       <Setter Property="FontSize" Value="12.5"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="TextBox">
-            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
-              <!-- Foreground is bound onto the content host on purpose: a bare
-                   PART_ContentHost ScrollViewer does not reliably inherit the
-                   TextBox's Foreground for the text it renders, which left typed
-                   text black on the dark card. -->
-              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"
-                            Foreground="{TemplateBinding Foreground}"/>
-            </Border>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
     </Style>
 
     <DataTemplate x:Key="ChoiceTemplate">
