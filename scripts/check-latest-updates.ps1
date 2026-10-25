@@ -41,6 +41,7 @@ param(
     [string]$TrackingFile = 'tracked_updates.json',
     [int[]]$Families = @(26100, 26200, 26300),
     [string]$Arch = 'x64',
+    [switch]$NoSave,
     [string]$GitHubOutput = ''
 )
 
@@ -136,26 +137,47 @@ if ($current.Count -eq 0) {
 
 $changed = @(Compare-TrackedUpdates -Tracked $tracked -Current $current)
 
-# First run only seeds the file - it must not page about the status quo.
-$report = if ($trackedExisted) { $changed } else { @() }
-if (-not $trackedExisted) {
-    Write-Output "First run: seeded $TrackingFile with the current updates (no notification)."
+# First run only seeds the file - it must not raise a "new update" page about the
+# status quo. It still reports first_run=true so the workflow can send a one-off
+# "watcher is now tracking X" confirmation instead of staying silent.
+$firstRun = -not $trackedExisted
+$report = if ($firstRun) { @() } else { $changed }
+if ($firstRun) {
+    Write-Output "First run: seeded $TrackingFile with the current updates."
 }
 
-$directory = Split-Path -Parent $TrackingFile
-if ($directory -and -not (Test-Path -LiteralPath $directory)) {
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+if (-not $NoSave) {
+    $directory = Split-Path -Parent $TrackingFile
+    if ($directory -and -not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    $current | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $TrackingFile -Encoding utf8
 }
-$current | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $TrackingFile -Encoding utf8
 
-$payload = (@($report) | ConvertTo-Json -Compress -Depth 6)
+$reportJson = (@($report) | ConvertTo-Json -Compress -Depth 6)
+
+# The full current map, for the "initialized" / manual-test status ping.
+$currentList = foreach ($k in ($current.Keys | Sort-Object)) {
+    $c = $current[$k]
+    [pscustomobject]@{
+        family      = $k
+        kb          = $c.kb
+        build       = $c.build
+        title       = $c.title
+        month       = $c.month
+        previous_kb = ''
+    }
+}
+$currentJson = (@($currentList) | ConvertTo-Json -Compress -Depth 6)
 
 if ($GitHubOutput) {
     if (@($report).Count -gt 0) { 'has_new=true' | Out-File -FilePath $GitHubOutput -Append -Encoding utf8 }
     else { 'has_new=false' | Out-File -FilePath $GitHubOutput -Append -Encoding utf8 }
+    "first_run=$(if ($firstRun) { 'true' } else { 'false' })" | Out-File -FilePath $GitHubOutput -Append -Encoding utf8
+    "current_updates<<EOF`n$currentJson`nEOF" | Out-File -FilePath $GitHubOutput -Append -Encoding utf8
     if (@($report).Count -gt 0) {
-        "new_updates<<EOF`n$payload`nEOF" | Out-File -FilePath $GitHubOutput -Append -Encoding utf8
+        "new_updates<<EOF`n$reportJson`nEOF" | Out-File -FilePath $GitHubOutput -Append -Encoding utf8
     }
 }
 
-$payload
+$reportJson

@@ -17,6 +17,11 @@ on:
     # often enough to catch the monthly Patch-Tuesday cumulative update.
     - cron: '0 3 * * 0'
   workflow_dispatch:
+    inputs:
+      test:
+        description: 'Send a status ping with the current tracked updates to verify the Discord webhook. Makes no changes to the tracking file.'
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # commit the tracking file
@@ -40,12 +45,15 @@ jobs:
         id: check
         shell: pwsh
         run: |
-          .\scripts\check-latest-updates.ps1 `
-            -TrackingFile tracked_updates.json `
-            -GitHubOutput $env:GITHUB_OUTPUT
+          # A manual "test" run must not consume a real change, so it skips saving.
+          if ("${{ github.event.inputs.test }}" -eq 'true') {
+            .\scripts\check-latest-updates.ps1 -TrackingFile tracked_updates.json -GitHubOutput $env:GITHUB_OUTPUT -NoSave
+          } else {
+            .\scripts\check-latest-updates.ps1 -TrackingFile tracked_updates.json -GitHubOutput $env:GITHUB_OUTPUT
+          }
 
       - name: Discord - new update available
-        if: steps.check.outputs.has_new == 'true'
+        if: github.event.inputs.test != 'true' && steps.check.outputs.has_new == 'true'
         continue-on-error: true
         shell: pwsh
         env:
@@ -57,6 +65,20 @@ jobs:
             --webhook "$env:DISCORD_WEBHOOK" `
             --type update-available `
             --data "$env:NEW_UPDATES"
+
+      - name: Discord - watcher status (first run or manual test)
+        if: github.event.inputs.test == 'true' || steps.check.outputs.first_run == 'true'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          CURRENT: ${{ steps.check.outputs.current_updates }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_RELEASES }}
+        run: |
+          python -m pip install --quiet requests
+          python scripts/discord_notify.py `
+            --webhook "$env:DISCORD_WEBHOOK" `
+            --type update-status `
+            --data "$env:CURRENT"
 
       - name: Commit updated tracking file
         if: always() && !cancelled()
@@ -77,8 +99,12 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if ("${{ steps.check.outputs.has_new }}" -eq 'true') {
+          if ("${{ github.event.inputs.test }}" -eq 'true') {
+            Write-Output "::notice title=Test::Sent a watcher status ping to Discord with the current tracked updates (no tracking change)."
+          } elseif ("${{ steps.check.outputs.has_new }}" -eq 'true') {
             Write-Output "::notice title=New update::A newer cumulative update was detected - Discord notified. Re-run the build workflow(s) to publish a fresh ISO."
+          } elseif ("${{ steps.check.outputs.first_run }}" -eq 'true') {
+            Write-Output "::notice title=Initialized::First run - seeded tracked_updates.json and sent a status ping. Future runs notify only on change."
           } else {
             Write-Output "No new cumulative updates since the last run."
           }

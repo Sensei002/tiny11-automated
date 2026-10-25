@@ -487,6 +487,46 @@ class TestNotifyUpdateAvailable:
 
 
 # ---------------------------------------------------------------------------
+# notify_update_status
+# ---------------------------------------------------------------------------
+
+class TestNotifyUpdateStatus:
+    @patch('requests.post')
+    def test_empty_list_is_a_no_op(self, mock_post):
+        mock_post.return_value = _ok_response()
+        assert _make_notifier().notify_update_status([]) is False
+        mock_post.assert_not_called()
+
+    @patch('requests.post')
+    def test_lists_currently_tracked(self, mock_post):
+        mock_post.return_value = _ok_response()
+        updates = [
+            {'family': '26100', 'kb': 'KB-A', 'build': '26100.1'},
+            {'family': '26300', 'kb': 'KB5127648', 'build': '26300.9711'},
+        ]
+        _make_notifier().notify_update_status(updates)
+        embed = mock_post.call_args[1]['json']['embeds'][0]
+        assert embed['title'] == '✅ Update Watcher Active'
+        field = next(f for f in embed['fields'] if f['name'] == '📊 Currently Tracking')
+        assert 'KB-A' in field['value']
+        assert 'KB5127648' in field['value']
+        assert '26H2' in field['value']
+
+    @patch('requests.post')
+    def test_cli_update_status(self, mock_post, monkeypatch):
+        mock_post.return_value = _ok_response()
+        monkeypatch.setattr(sys, 'argv', [
+            'discord_notify.py',
+            '--webhook', 'https://discord.com/api/webhooks/0/tok',
+            '--type', 'update-status',
+            '--data', json.dumps([{'family': '26300', 'kb': 'KB5127648', 'build': '26300.9711'}]),
+        ])
+        assert main() == 0
+        embed = mock_post.call_args[1]['json']['embeds'][0]
+        assert embed['title'] == '✅ Update Watcher Active'
+
+
+# ---------------------------------------------------------------------------
 # _require helper
 # ---------------------------------------------------------------------------
 

@@ -250,6 +250,56 @@ class DiscordNotifier:
             thumbnail='https://upload.wikimedia.org/wikipedia/commons/e/e6/Windows_11_logo.svg'
         )
 
+    def notify_update_status(self, updates: List[Dict]) -> bool:
+        """Show what the watcher is currently tracking.
+
+        Used for the one-off first-run confirmation and for the workflow's manual
+        "test" button, so the Discord wiring can be verified without waiting for an
+        actual new update. Deliberately neutral - it is not a "new update" page.
+        """
+        if not updates:
+            return False
+
+        family_names = {
+            '26100': '24H2 / LTSC 2024',
+            '26200': '25H2',
+            '26300': '26H2',
+        }
+
+        lines = []
+        for u in updates[:10]:
+            fam = str(u.get('family', '?'))
+            label = family_names.get(fam, fam)
+            kb = u.get('kb', '?')
+            build = u.get('build', '?')
+            lines.append(f"• **{label}** — {kb} (build {build})")
+
+        update_list = '\n'.join(lines)
+        if len(updates) > 10:
+            update_list += f"\n... and {len(updates) - 10} more"
+
+        plural = 'family' if len(updates) == 1 else 'families'
+        fields = [
+            {
+                'name': '📊 Currently Tracking',
+                'value': self._truncate(update_list),
+                'inline': False
+            },
+            {
+                'name': '🔔 You will be pinged',
+                'value': 'when Microsoft publishes a newer cumulative update for any of these - and only then. No build runs automatically.',
+                'inline': False
+            }
+        ]
+
+        return self.send_embed(
+            title='✅ Update Watcher Active',
+            description=f'The watcher is tracking **{len(updates)}** build {plural}.',
+            color='update',
+            fields=fields,
+            thumbnail='https://upload.wikimedia.org/wikipedia/commons/e/e6/Windows_11_logo.svg'
+        )
+
     def notify_build_started(
         self,
         version: str,
@@ -487,7 +537,7 @@ def main():
     )
     parser.add_argument('--type', required=True, choices=[
         'new-releases', 'build-started', 'build-completed',
-        'build-failed', 'daily-summary', 'builds-triggered', 'update-available'
+        'build-failed', 'daily-summary', 'builds-triggered', 'update-available', 'update-status'
     ])
     parser.add_argument('--data', help='JSON data for notification')
 
@@ -532,6 +582,10 @@ def main():
         elif args.type == 'update-available':
             updates = data if isinstance(data, list) else data.get('updates', [])
             success = notifier.notify_update_available(updates)
+
+        elif args.type == 'update-status':
+            updates = data if isinstance(data, list) else data.get('updates', [])
+            success = notifier.notify_update_status(updates)
 
         elif args.type == 'build-started':
             _require(data, 'version', 'build_type', 'edition')
