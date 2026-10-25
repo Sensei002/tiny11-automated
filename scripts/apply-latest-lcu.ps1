@@ -17,6 +17,10 @@
       4. DISM /Add-Package into the mounted image
       5. prove the image build actually moved
 
+    Only the package carrying the selected KB is mandatory. A bundled prerequisite
+    is applied best-effort: media newer than the checkpoint already incorporates it,
+    and DISM rejects the redundant package rather than skipping it.
+
     It runs BEFORE the debloat passes on purpose. Debloating after the update means
     the removals act on the final payload rather than on a superseded one, and it
     must run before Optimize-WinSxS: gutting the component store first removes the
@@ -255,6 +259,36 @@ function Get-PackageSortKey {
     return [int]::MaxValue
 }
 
+function Test-PrimaryPackage {
+    <#
+    .SYNOPSIS
+        True when a downloaded package is the update that was actually selected.
+
+    .DESCRIPTION
+        A catalog entry is a bundle, not a single file: the current cumulative
+        update plus whatever prerequisite it declares. The package whose filename
+        carries the selected KB is the payload; everything else in the bundle is a
+        prerequisite that only some images need.
+
+        An unknown KB makes every package a prerequisite. That is the safe side of
+        the guess: the build-advance check after the loop still refuses to call the
+        update done, so a genuinely broken payload cannot slip through - it only
+        loses the ability to fail on the prerequisite first.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [Parameter(Mandatory = $false)][AllowEmptyString()][string]$Kb
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Kb)) { return $false }
+
+    $digits = $Kb -replace '[^0-9]', ''
+    if (-not $digits) { return $false }
+
+    # The trailing (?!\d) stops KB5127648 from claiming KB51276489.
+    return $FileName -match "(?i)kb$digits(?!\d)"
+}
+
 function Test-BuildAdvanced {
     <#
     .SYNOPSIS
@@ -453,15 +487,45 @@ function Save-UpdatePackage {
     }
 }
 
+function Get-PackageOutcome {
+    <#
+    .SYNOPSIS
+        Maps a DISM /Add-Package exit code to what the caller should do.
+    .DESCRIPTION
+        Kept separate from the DISM call so the decision can be tested without a
+        mounted image. Returns 'applied', 'not-applicable', 'failed-optional' or
+        'failed'.
+    #>
+    param(
+        # [long], not [int]: CBS_E_NOT_APPLICABLE is 0x800F081E, whose unsigned
+        # spelling (2148468766) does not fit in an Int32. DISM's own $LASTEXITCODE
+        # arrives as the signed -2146498530; both must be accepted.
+        [Parameter(Mandatory = $true)][long]$Code,
+        [switch]$Optional
+    )
+
+    if ($Code -eq 0) { return 'applied' }
+
+    # 0x800f081e = CBS_E_NOT_APPLICABLE, in its signed and unsigned spellings.
+    if ($Code -eq -2146498530 -or $Code -eq 2148468766) { return 'not-applicable' }
+
+    if ($Optional) { return 'failed-optional' }
+    return 'failed'
+}
+
 function Add-PackageToMountedImage {
     <#
     .SYNOPSIS
-        DISM /Add-Package, tolerating a package the image already contains.
+        DISM /Add-Package, tolerating a package the image does not need.
+    .DESCRIPTION
+        Returns 'applied', 'not-applicable', or - only when -Optional is set -
+        'failed-optional'. A mandatory package that DISM rejects still throws.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$PackagePath,
-        [string]$LogPath
+        [string]$LogPath,
+        [switch]$Optional
     )
 
     $arguments = @('/English', "/Image:$Path", '/Add-Package', "/PackagePath:$PackagePath")
@@ -470,12 +534,22 @@ function Add-PackageToMountedImage {
     $output = & dism @arguments 2>&1
     $code = $LASTEXITCODE
 
-    # 0x800f081e = CBS_E_NOT_APPLICABLE. Expected for a checkpoint package the
-    # image already incorporates; it must not fail the build.
-    if ($code -eq 0) { return 'applied' }
-    if ($code -eq -2146498530 -or $code -eq 2148468766) { return 'not-applicable' }
+    $outcome = Get-PackageOutcome -Code $code -Optional:$Optional
+    if ($outcome -eq 'applied' -or $outcome -eq 'not-applicable') { return $outcome }
 
     $tail = ($output | Select-Object -Last 12) -join [Environment]::NewLine
+
+    # A prerequisite that this image has already superseded does not always come
+    # back as CBS_E_NOT_APPLICABLE. A 26100 checkpoint dropped onto 26300 media is
+    # rejected as exit 552 / 0x80070228 while DISM expands the .msu's unattend.xml,
+    # which is not an applicability code at all. The prerequisite is only ever an
+    # optimisation for older images, so it may not sink the build; if it really was
+    # required, the payload that depends on it fails immediately afterwards.
+    if ($outcome -eq 'failed-optional') {
+        Write-LcuLog "  $(Split-Path -Leaf $PackagePath) rejected by DISM (exit $code) - treated as already incorporated.`n$tail" 'WARN'
+        return $outcome
+    }
+
     throw "DISM /Add-Package failed with exit code $code.`n$tail"
 }
 
@@ -606,13 +680,22 @@ function Invoke-LatestLcuUpdate {
 
     foreach ($package in $downloaded) {
         $name = Split-Path -Leaf $package
+
+        # The bundle carries the current update plus its prerequisites. Only the
+        # package with the selected KB is allowed to fail the build; the rest are
+        # best-effort, because an image newer than the checkpoint has no use for it.
+        $optional = -not (Test-PrimaryPackage -FileName $name -Kb $update.Kb)
+
         Write-LcuLog "Adding $name"
-        $outcome = Add-PackageToMountedImage -Path $Path -PackagePath $package -LogPath $LogPath
-        if ($outcome -eq 'not-applicable') {
-            Write-LcuLog "  $name is not applicable (already incorporated) - skipped" 'WARN'
-        } else {
+        $outcome = Add-PackageToMountedImage -Path $Path -PackagePath $package `
+            -LogPath $LogPath -Optional:$optional
+
+        if ($outcome -eq 'applied') {
             Write-LcuLog "  $name applied"
+        } elseif ($outcome -eq 'not-applicable') {
+            Write-LcuLog "  $name is not applicable (already incorporated) - skipped" 'WARN'
         }
+        # 'failed-optional' is logged in full by Add-PackageToMountedImage.
     }
 
     $after = Get-MountedImageVersion -Path $Path

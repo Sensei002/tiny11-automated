@@ -202,6 +202,60 @@ Describe 'Update selection' {
     }
 }
 
+Describe 'Bundle package handling' {
+
+    # The catalog answers one update with a bundle. KB5127648 (26H2, 26300.9711)
+    # ships KB5043080 - the 24H2 checkpoint - alongside it. On 26300 media that
+    # checkpoint is already incorporated, and DISM rejects it with 552/0x80070228
+    # rather than CBS_E_NOT_APPLICABLE. Treating it as mandatory aborted the build
+    # before the real update was ever attempted.
+
+    It 'treats the package carrying the selected KB as the payload' {
+        Test-PrimaryPackage -FileName 'windows11.0-kb5127648-x64_2b88d2d3.msu' -Kb 'KB5127648' |
+            Should -BeTrue
+    }
+
+    It 'treats the checkpoint in the same bundle as a prerequisite' {
+        Test-PrimaryPackage -FileName 'windows11.0-kb5043080-x64_953449672073f8fb99.msu' -Kb 'KB5127648' |
+            Should -BeFalse
+    }
+
+    It 'matches case-insensitively and accepts a bare KB number' {
+        Test-PrimaryPackage -FileName 'Windows11.0-KB5127648-x64.msu' -Kb '5127648' |
+            Should -BeTrue
+    }
+
+    It 'does not match a KB that merely starts with the selected one' {
+        Test-PrimaryPackage -FileName 'windows11.0-kb51276489-x64.msu' -Kb 'KB5127648' |
+            Should -BeFalse
+    }
+
+    It 'treats every package as a prerequisite when the KB is unknown' {
+        Test-PrimaryPackage -FileName 'windows11.0-kb5043080-x64.msu' -Kb '' |
+            Should -BeFalse
+    }
+
+    It 'lets an optional package fail without throwing' {
+        Get-PackageOutcome -Code 552 -Optional | Should -Be 'failed-optional'
+    }
+
+    It 'still fails the build when the payload itself is rejected' {
+        Get-PackageOutcome -Code 552 | Should -Be 'failed'
+    }
+
+    It 'reads CBS_E_NOT_APPLICABLE as already incorporated, not as a failure' -ForEach @(
+        @{ Code = -2146498530; Label = 'signed' }
+        @{ Code = 2148468766; Label = 'unsigned' }
+    ) {
+        Get-PackageOutcome -Code $Code | Should -Be 'not-applicable'
+        Get-PackageOutcome -Code $Code -Optional | Should -Be 'not-applicable'
+    }
+
+    It 'reports a clean apply as applied' {
+        Get-PackageOutcome -Code 0 | Should -Be 'applied'
+    }
+}
+
 Describe 'Builder wiring' {
 
     It 'declares -UpdateToLatest in the <Name> builder' -ForEach @(
