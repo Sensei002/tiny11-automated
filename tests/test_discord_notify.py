@@ -438,6 +438,55 @@ class TestNotifyNewReleases:
 
 
 # ---------------------------------------------------------------------------
+# notify_update_available
+# ---------------------------------------------------------------------------
+
+class TestNotifyUpdateAvailable:
+    @patch('requests.post')
+    def test_empty_list_is_a_no_op(self, mock_post):
+        mock_post.return_value = _ok_response()
+        assert _make_notifier().notify_update_available([]) is False
+        mock_post.assert_not_called()
+
+    @patch('requests.post')
+    def test_lists_updates_with_kb_build_and_previous(self, mock_post):
+        mock_post.return_value = _ok_response()
+        updates = [{'family': '26300', 'kb': 'KB5127648', 'build': '26300.9711', 'previous_kb': 'KB5129195'}]
+        _make_notifier().notify_update_available(updates)
+        embed = mock_post.call_args[1]['json']['embeds'][0]
+        assert embed['color'] == DiscordNotifier.COLORS['update']
+        field = next(f for f in embed['fields'] if f['name'] == '🔄 New Cumulative Update(s)')
+        assert 'KB5127648' in field['value']
+        assert '26300.9711' in field['value']
+        assert 'KB5129195' in field['value']   # previous KB is surfaced
+        assert '26H2' in field['value']        # friendly family label
+
+    @patch('requests.post')
+    def test_new_family_has_no_previous(self, mock_post):
+        mock_post.return_value = _ok_response()
+        updates = [{'family': '26100', 'kb': 'KB-A', 'build': '26100.1', 'previous_kb': ''}]
+        _make_notifier().notify_update_available(updates)
+        field = next(
+            f for f in mock_post.call_args[1]['json']['embeds'][0]['fields']
+            if f['name'] == '🔄 New Cumulative Update(s)'
+        )
+        assert 'was' not in field['value']
+
+    @patch('requests.post')
+    def test_cli_update_available(self, mock_post, monkeypatch):
+        mock_post.return_value = _ok_response()
+        monkeypatch.setattr(sys, 'argv', [
+            'discord_notify.py',
+            '--webhook', 'https://discord.com/api/webhooks/0/tok',
+            '--type', 'update-available',
+            '--data', json.dumps([{'family': '26300', 'kb': 'KB5127648', 'build': '26300.9711', 'previous_kb': ''}]),
+        ])
+        assert main() == 0
+        embed = mock_post.call_args[1]['json']['embeds'][0]
+        assert any('KB5127648' in f['value'] for f in embed['fields'])
+
+
+# ---------------------------------------------------------------------------
 # _require helper
 # ---------------------------------------------------------------------------
 

@@ -233,6 +233,68 @@ def validate_ltsc_workflows() -> None:
             print("[FAIL] -ExpectedEdition is not passed")
 
 
+def validate_watch_updates() -> None:
+    """The update watcher must stay a notifier, never a build trigger.
+
+    Its whole point is to ping Discord when a newer cumulative update is published
+    and leave the build to a human. A stray createWorkflowDispatch here would
+    silently turn it back into an auto-builder, which is exactly what this watcher
+    exists to avoid.
+    """
+    print()
+    print("Update watcher")
+
+    path = WORKFLOWS / "watch-updates.yml"
+    if not path.exists():
+        problems.append("missing watch-updates.yml")
+        print("[FAIL] watch-updates.yml is missing")
+        return
+
+    try:
+        doc = load_yaml(path)
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"watch-updates.yml is not valid YAML: {exc}")
+        print(f"[FAIL] not valid YAML: {exc}")
+        return
+    print("[ok]   parses as valid YAML")
+
+    checker = REPO_ROOT / "scripts" / "check-latest-updates.ps1"
+    if not checker.exists():
+        problems.append("missing scripts/check-latest-updates.ps1")
+        print("[FAIL] scripts/check-latest-updates.ps1 is missing")
+        return
+
+    raw = path.read_text(encoding="utf-8")
+
+    # It must drive the shared, tested catalog logic rather than a second scraper.
+    if "check-latest-updates.ps1" in raw:
+        print("[ok]   reuses scripts/check-latest-updates.ps1")
+    else:
+        problems.append("watch-updates.yml does not call check-latest-updates.ps1")
+        print("[FAIL] does not call check-latest-updates.ps1")
+
+    # And it must notify through the shared notifier.
+    if "discord_notify.py" in raw and "update-available" in raw:
+        print("[ok]   notifies via discord_notify.py (update-available)")
+    else:
+        problems.append("watch-updates.yml does not send the update-available notification")
+        print("[FAIL] missing update-available Discord notification")
+
+    # The one thing it must never do.
+    if "createWorkflowDispatch" in raw:
+        problems.append("watch-updates.yml auto-triggers a build (createWorkflowDispatch)")
+        print("[FAIL] must not auto-trigger a build")
+    else:
+        print("[ok]   never auto-triggers a build")
+
+    on_block = doc.get("on") or doc.get(True) or {}
+    if on_block.get("schedule"):
+        print("[ok]   runs on a schedule")
+    else:
+        problems.append("watch-updates.yml has no schedule trigger")
+        print("[FAIL] no schedule trigger")
+
+
 def validate_sourceforge_folders() -> None:
     """One folder per variant, and the backfill must not invent a different one.
 
@@ -600,6 +662,7 @@ def main() -> int:
         print("[FAIL] profile validation should precede the ISO download")
 
     validate_ltsc_workflows()
+    validate_watch_updates()
     validate_sourceforge_folders()
     validate_dispatch_input_counts()
     validate_local_build_profiles()

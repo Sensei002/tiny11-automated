@@ -279,7 +279,11 @@ jobs:
   trigger-builds:
     name: Trigger Automated Builds
     needs: detect-releases
-    if: needs.detect-releases.outputs.has_new == 'true' && (github.event_name == 'schedule' || github.event.inputs.skip_build != 'true')
+    # Auto-trigger is OPT-IN. By default a new release only raises the Discord ping
+    # and the tracking issue above; set the repository variable AUTO_TRIGGER_BUILDS
+    # to 'true' to also dispatch the build workflows automatically. (watch-updates.yml
+    # covers incremental cumulative updates separately and never auto-triggers.)
+    if: needs.detect-releases.outputs.has_new == 'true' && vars.AUTO_TRIGGER_BUILDS == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -329,7 +333,7 @@ jobs:
   notify-completion:
     name: Send Completion Notification
     needs: [detect-releases, trigger-builds]
-    if: always() && needs.detect-releases.outputs.has_new == 'true'
+    if: always() && needs.detect-releases.outputs.has_new == 'true' && needs.trigger-builds.result == 'success'
     runs-on: ubuntu-latest
     
     steps:

@@ -33,7 +33,8 @@ class DiscordNotifier:
         'error': 0xFF0000,    # Red
         'info': 0x3498DB,     # Blue
         'warning': 0xFFA500,  # Orange
-        'release': 0x9B59B6   # Purple
+        'release': 0x9B59B6,  # Purple
+        'update': 0x1ABC9C    # Teal
     }
 
     # Retry/backoff configuration for transient Discord/network failures.
@@ -192,6 +193,59 @@ class DiscordNotifier:
             title='🆕 New Windows Releases Detected!',
             description=f'Found **{len(releases)}** new Windows 11 build(s) ready for processing.',
             color='release',
+            fields=fields,
+            thumbnail='https://upload.wikimedia.org/wikipedia/commons/e/e6/Windows_11_logo.svg'
+        )
+
+    def notify_update_available(self, updates: List[Dict]) -> bool:
+        """Notify that a newer cumulative update is available to rebuild from.
+
+        The build workflows already slipstream the newest update, so this is a nudge
+        to re-run them - not an announcement that a build is happening. It never
+        implies an automatic trigger; a human decides when to build.
+        """
+        if not updates:
+            return False
+
+        family_names = {
+            '26100': '24H2 / LTSC 2024',
+            '26200': '25H2',
+            '26300': '26H2',
+        }
+
+        lines = []
+        for u in updates[:10]:
+            fam = str(u.get('family', '?'))
+            label = family_names.get(fam, fam)
+            kb = u.get('kb', '?')
+            build = u.get('build', '?')
+            prev = u.get('previous_kb', '')
+            if prev:
+                lines.append(f"• **{label}** — {kb} (build {build}), was {prev}")
+            else:
+                lines.append(f"• **{label}** — {kb} (build {build})")
+
+        update_list = '\n'.join(lines)
+        if len(updates) > 10:
+            update_list += f"\n... and {len(updates) - 10} more"
+
+        fields = [
+            {
+                'name': '🔄 New Cumulative Update(s)',
+                'value': self._truncate(update_list),
+                'inline': False
+            },
+            {
+                'name': '🛠️ Next Step',
+                'value': 'Run the build workflow(s) for these versions to slipstream the update and publish a fresh ISO.',
+                'inline': False
+            }
+        ]
+
+        return self.send_embed(
+            title='🔔 New Windows Update Available',
+            description=f'Microsoft published **{len(updates)}** newer cumulative update(s). A rebuild will pick them up.',
+            color='update',
             fields=fields,
             thumbnail='https://upload.wikimedia.org/wikipedia/commons/e/e6/Windows_11_logo.svg'
         )
@@ -433,7 +487,7 @@ def main():
     )
     parser.add_argument('--type', required=True, choices=[
         'new-releases', 'build-started', 'build-completed',
-        'build-failed', 'daily-summary', 'builds-triggered'
+        'build-failed', 'daily-summary', 'builds-triggered', 'update-available'
     ])
     parser.add_argument('--data', help='JSON data for notification')
 
@@ -474,6 +528,10 @@ def main():
                 data.get('builds_count', 0),
                 data.get('releases', [])
             )
+
+        elif args.type == 'update-available':
+            updates = data if isinstance(data, list) else data.get('updates', [])
+            success = notifier.notify_update_available(updates)
 
         elif args.type == 'build-started':
             _require(data, 'version', 'build_type', 'edition')
