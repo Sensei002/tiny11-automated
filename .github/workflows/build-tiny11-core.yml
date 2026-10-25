@@ -13,9 +13,9 @@ on:
         required: false
         default: '26H2'
       windows_iso_url:
-        description: 'Windows 11 ISO download URL'
-        required: true
-        default: 'https://software.download.prss.microsoft.com/dbazure/Windows11_Client_x64_en-us_26300_9457.iso?t=80c8fc30-ff56-4c95-8024-adc31f3918cb&P1=1791748912&P2=602&P3=2&P4=iVKrQtUXouUQIrGM81OYIB8hRan2qtmXe2qAIEU3Yt4EcqV0aHWqRtPrWr3q%2bwB2mhxz9795hHc%2bNp1MsjJjJU9mIL5SZPD13Aw1ZxH5O6oANHYS84G3k%2f0JZbPiBIe5%2bG8CpdpAJhq6n5yzYgajyGkmgvmVYmidHOPO3BehAgfu3hwqFk9uozIrikhCkr2Rk6u6yT4%2f1Al4V5duQjJUDqT2irslL%2fRe5qh1wRH%2bADoHxUsN%2fIJt6yzx%2fRa5%2fx9n7nJTIjOj7Dlg1Zdf1oc%2bES4JSzrur6TRuGjTZAVSKSyobiBJAe3s6FkhW7boGWvUzdyHF2qc%2fBNhjuJPh9HB0g%3d%3d'
+        description: 'Optional. Leave EMPTY to auto-resolve a fresh, signed Windows 11 ISO link from Microsoft at run time - the consumer download page has no static link, so any URL pasted here expires in ~24h. Provide a direct link only to override, e.g. to pin an older 24H2/25H2 build the consumer page no longer serves.'
+        required: false
+        default: ''
       windows_build:
         description: 'Fallback Windows build number (e.g. 26200.8655) — only used if it cannot be read directly from the ISO'
         required: false
@@ -195,10 +195,71 @@ jobs:
           Write-Output "Build will continue in 10 seconds..."
           Start-Sleep -Seconds 10
 
+      - name: Resolve Windows 11 ISO download URL
+        shell: pwsh
+        run: |
+          # Microsoft's consumer download page has no static ISO link: it mints a
+          # short-lived signed dbazure URL on demand, so a URL pasted into the input
+          # expires within ~24h (which is why a hardcoded default goes stale). When
+          # the input is empty we mint a fresh one here, driving the same request
+          # sequence Fido (pbatard/Fido) uses, via curl.exe - no Playwright needed.
+          # Providing a URL still overrides this, e.g. to pin an older build.
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+
+          $override = "${{ github.event.inputs.windows_iso_url }}"
+          if (-not [string]::IsNullOrWhiteSpace($override)) {
+            Write-Output "Using the ISO URL supplied in the input (override)."
+            $isoUrl = $override.Trim()
+          } else {
+            $version  = "${{ github.event.inputs.windows_version }}"
+            $language = "${{ github.event.inputs.language }}"
+
+            # Microsoft spells languages as the download page shows them.
+            if ([string]::IsNullOrWhiteSpace($language) -or $language -match '(?i)^en') {
+              $msLanguage = 'English (United States)'
+            } else {
+              $msLanguage = $language
+            }
+
+            # The consumer download page only serves the current release. 3813 is the
+            # x64 multi-edition ISO Fido lists for it (currently 26H2). Any other or
+            # older version label still resolves the current ISO; paste a URL to pin
+            # a specific older build.
+            $productEditionIds = @{ '26H2' = 3813 }
+            $productEditionId  = 3813
+            if ($productEditionIds.ContainsKey($version)) { $productEditionId = $productEditionIds[$version] }
+
+            Write-Output "No URL supplied - resolving the current Windows 11 consumer ISO from Microsoft..."
+            Write-Output "  version label : $version"
+            Write-Output "  language      : $msLanguage"
+            Write-Output "  productEdition: $productEditionId"
+
+            try {
+              $iso = & .\scripts\resolve-windows-iso.ps1 -Language $msLanguage -ProductEditionId $productEditionId
+            } catch {
+              Write-Error "Failed to resolve the Windows 11 ISO URL: $($_.Exception.Message)"
+              exit 1
+            }
+            if (-not $iso -or [string]::IsNullOrWhiteSpace($iso.Url)) {
+              Write-Error "resolve-windows-iso.ps1 returned no download URL."
+              exit 1
+            }
+            $isoUrl = $iso.Url
+            Write-Output "Resolved ISO: $($iso.FileName)"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($isoUrl)) {
+            Write-Error "No Windows 11 ISO URL could be determined."
+            exit 1
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "WINDOWS_ISO_URL=$isoUrl"
+          Write-Output "ISO download URL ready (saved to WINDOWS_ISO_URL)."
+
       - name: Download Windows 11 ISO
         shell: pwsh
         run: |
-          $url = "${{ github.event.inputs.windows_iso_url }}"
+          $url = "$env:WINDOWS_ISO_URL"
           $output = "Win11_Source.iso"
 
           Write-Output "Downloading Windows 11 ISO from Microsoft servers..."
