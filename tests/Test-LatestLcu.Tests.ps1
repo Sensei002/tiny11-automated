@@ -463,45 +463,42 @@ Describe 'SourceForge upload resilience' {
 
 Describe 'Mounted-image version detection' {
 
-    BeforeAll {
-        # Make Get-WindowsImage present so it can be mocked both on a host without the
-        # Dism module (a local / non-Windows test runner) and on a Windows runner.
-        if (-not (Get-Command Get-WindowsImage -ErrorAction SilentlyContinue)) {
-            function Get-WindowsImage { param([switch]$Mounted) }
-        }
+    # These tests used to mock Get-WindowsImage -Mounted returning MountPath and
+    # ImageVersion. Neither property exists: MountedImageInfoObject exposes only
+    # Path, ImagePath, ImageIndex, MountMode and MountStatus. The mocks passed while
+    # the real call threw under StrictMode, so the function silently fell back to the
+    # misstamped kernel - and run 40167175923 reported a successfully applied
+    # 26300.9711 update as "still 10.0.26100.9711".
+
+    It 'reads the build from the offline hive' {
+        Mock Get-OfflineImageBuild { '26300.9711' }
+        Get-MountedImageVersion -Path 'C:\mount' | Should -Be '26300.9711'
     }
 
-    It 'reads the DISM build (26300.9457), not the misstamped kernel, for 26H2 media' {
-        # This is the exact regression from run #40133719975: the kernel on the
-        # 26H2 ISO reports 26100.9457, so a kernel read selects the 24H2 catalog and
-        # DISM rejects the package (exit 552 / 0x80070228).
-        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith {
-            return @(
-                [pscustomobject]@{ MountPath = 'C:\mount'; ImageVersion = [version]'10.0.26300.9457' }
-            )
-        }
-        Get-MountedImageVersion -Path 'C:\mount' | Should -Be '26300.9457'
-    }
-
-    It 'matches by mount path and ignores other mounted images' {
-        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith {
-            return @(
-                [pscustomobject]@{ MountPath = 'C:\other'; ImageVersion = [version]'10.0.26100.1742' }
-                [pscustomobject]@{ MountPath = 'C:\mount'; ImageVersion = [version]'10.0.26300.9457' }
-            )
-        }
-        Get-MountedImageVersion -Path 'C:\mount' | Should -Be '26300.9457'
-    }
-
-    It 'falls back to the kernel when DISM reports nothing' {
-        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith { return @() }
-        # No real kernel on the fake path, so it returns empty rather than throwing.
+    It 'falls back to the kernel only when the hive cannot be read' {
+        Mock Get-OfflineImageBuild { '' }
+        # No real kernel on the fake path, so this returns empty rather than throwing.
         Get-MountedImageVersion -Path 'C:\nope' | Should -Be ''
     }
 
-    It 'returns empty when DISM throws and no kernel exists' {
-        Mock Get-WindowsImage -ParameterFilter { $Mounted -eq $true } -MockWith { throw 'boom' }
-        Get-MountedImageVersion -Path 'C:\nope' | Should -Be ''
+    It 'reports no build when the image has no SOFTWARE hive' {
+        Get-OfflineImageBuild -Path 'C:\nope' | Should -Be ''
+    }
+
+    It 'never asks Get-WindowsImage -Mounted for a version' {
+        # The guard against the whole class of bug: the object it returns has no
+        # version field, so any such read is dead code that throws at runtime.
+        $source = Get-Content -LiteralPath $lcuPath -Raw
+        $source | Should -Not -Match '\.ImageVersion'
+        $source | Should -Not -Match '\.MountPath'
+    }
+
+    It 'reads CurrentBuildNumber and UBR together' {
+        # The hive is only trusted as a pair: CurrentBuildNumber alone gives 26300,
+        # which Test-BuildAdvanced would read as an advance from 26300.9457.
+        $source = Get-Content -LiteralPath $lcuPath -Raw
+        $source | Should -Match 'CurrentBuildNumber'
+        $source | Should -Match 'UBR'
     }
 }
 
@@ -517,7 +514,10 @@ Describe 'LCU version selection' {
         $lcuSource | Should -Match '\$before = \$Version'
     }
 
-    It 'reads the mounted build from DISM, not the kernel, to pick the update family' {
-        $lcuSource | Should -Match 'Get-WindowsImage -Mounted'
+    It 'reads the mounted build from the image hive, not the kernel, to pick the update family' {
+        # Get-WindowsImage -Mounted was the old answer and cannot work: its
+        # MountedImageInfoObject carries no version field.
+        $lcuSource | Should -Match 'Get-OfflineImageBuild'
+        $lcuSource | Should -Match 'CurrentBuildNumber'
     }
 }

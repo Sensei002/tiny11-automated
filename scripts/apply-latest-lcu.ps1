@@ -412,49 +412,104 @@ function Get-CatalogDownloadUrls {
 
 #---------[ Image work ]---------#
 
-function Get-MountedImageVersion {
+function Get-OfflineImageBuild {
     <#
     .SYNOPSIS
-        Reads the image build from DISM (the mounted-image OS version).
+        Reads the build of a mounted image from its own registry hive.
 
     .DESCRIPTION
-        DISM reports the image's real OS build (e.g. 10.0.26300.9457), which is the
-        authoritative value for choosing the correct cumulative-update family and for
-        verifying the update landed. Reading the kernel binary's ProductVersion is NOT
-        reliable: on some 26H2 media the kernel resource is still stamped with the
-        24H2 build (10.0.26100.x), which would make us query the 24H2 catalog,
-        download the 26100 CU and have DISM reject it (exit 552 / 0x80070228).
+        The SOFTWARE hive inside the mount directory is the only place the mounted
+        image's real build is written down. CurrentBuildNumber carries the family
+        (26300) and UBR the revision (9711), which together give the 26300.9711 that
+        the catalog and the caller both speak in.
+
+        Get-WindowsImage -Mounted cannot answer this: its MountedImageInfoObject
+        exposes only Path, ImagePath, ImageIndex, MountMode and MountStatus - there is
+        no version field at all. Reading the WIM instead would be stale, because the
+        WIM is not written back until the image is committed.
+
+        Returns '' when the hive cannot be read, so the caller can decide what an
+        unverifiable image means rather than trusting a guess.
     #>
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    # DISM is the source of truth for the mounted image's OS version.
-    try {
-        $mounted = Get-WindowsImage -Mounted -ErrorAction Stop |
-            Where-Object { $_.MountPath -and ($_.MountPath.TrimEnd('\') -ieq $Path.TrimEnd('\')) } |
-            Select-Object -First 1
-        if ($mounted -and $mounted.ImageVersion) {
-            $version = $mounted.ImageVersion.ToString()
-            if ($version -match '(\d+\.\d+\.\d+\.\d+)') {
-                # Normalise "10.0.26300.9457" -> "26300.9457" to match the caller's
-                # convention (DetectedBuildNumber carries no "10.0." prefix).
-                return $Matches[1] -replace '^10\.0\.', ''
-            }
-        }
-    } catch {
-        Write-LcuLog "Get-WindowsImage -Mounted failed ($_); falling back to the kernel version." 'WARN'
+    $hive = Join-Path $Path 'Windows\System32\config\SOFTWARE'
+    if (-not (Test-Path -LiteralPath $hive)) {
+        Write-LcuLog "No SOFTWARE hive under $Path; cannot read the image build." 'WARN'
+        return ''
     }
 
-    # Fallback: kernel binary version. Known to mis-report the family on 26H2 media
-    # (kernel stamped 26100 while the OS is 26300), so only use it when DISM is
-    # unavailable.
+    # z-prefixed to match the hives the builder already loads, and distinct enough
+    # that a stale one left behind by an earlier crash cannot collide with it.
+    $keyName = 'zTiny11LcuProbe'
+    $keyPath = "HKLM\$keyName"
+    $psPath = "HKLM:\$keyName"
+
+    try {
+        # reg load refuses to reuse a key that is already mounted, and a run that was
+        # killed between load and unload would leave one behind.
+        & reg.exe unload $keyPath 2>&1 | Out-Null
+
+        & reg.exe load $keyPath $hive 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-LcuLog "reg load of $hive failed (exit $LASTEXITCODE); cannot read the image build." 'WARN'
+            return ''
+        }
+
+        $currentVersion = Get-ItemProperty -Path "$psPath\Microsoft\Windows NT\CurrentVersion" -ErrorAction Stop
+
+        $build = [string]$currentVersion.CurrentBuildNumber
+        $ubr = $null
+        if ($null -ne $currentVersion.PSObject.Properties['UBR']) {
+            $ubr = $currentVersion.UBR
+        }
+
+        if ([string]::IsNullOrWhiteSpace($build) -or $null -eq $ubr) {
+            Write-LcuLog "The image hive has no CurrentBuildNumber/UBR pair; cannot read the image build." 'WARN'
+            return ''
+        }
+
+        return "$build.$ubr"
+    } catch {
+        Write-LcuLog "Reading the image hive failed ($($_.Exception.Message)); cannot read the image build." 'WARN'
+        return ''
+    } finally {
+        & reg.exe unload $keyPath 2>&1 | Out-Null
+    }
+}
+
+function Get-MountedImageVersion {
+    <#
+    .SYNOPSIS
+        Reads the mounted image's OS build, e.g. '26300.9711'.
+
+    .DESCRIPTION
+        The hive is authoritative and reflects packages applied to the mount, so it
+        is the only source that can prove a cumulative update landed.
+
+        The kernel binary is a last resort and is known to lie about the family on
+        26H2 media: it is stamped 26100 while the OS is 26300. Trusting it once sent
+        the update to the 24H2 catalog, and trusting it again reported a successful
+        26300.9711 update as a 26100.9711 failure. It is kept only so a caller on a
+        host where the hive cannot be loaded still gets an answer.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $build = Get-OfflineImageBuild -Path $Path
+    if ($build) { return $build }
+
     $kernel = Join-Path $Path 'Windows\System32\ntoskrnl.exe'
     if (Test-Path -LiteralPath $kernel) {
         $version = (Get-Item -LiteralPath $kernel).VersionInfo.ProductVersion
-        if ($version -match '(\d+\.\d+\.\d+\.\d+)') { return $Matches[1] }
+        if ($version -match '(\d+\.\d+\.\d+\.\d+)') {
+            Write-LcuLog "Falling back to the kernel version ($Matches[1]); this may mis-report the family on 26H2 media." 'WARN'
+            return $Matches[1]
+        }
     }
 
     return ''
 }
+
 
 function Save-UpdatePackage {
     param(
@@ -704,6 +759,13 @@ function Invoke-LatestLcuUpdate {
     if (Test-BuildAdvanced -Before $before -After $after) {
         Write-LcuLog "Image updated: $before -> $after" 'SUCCESS'
         $result.Applied = $true
+    } elseif ([string]::IsNullOrWhiteSpace($after)) {
+        # Distinct from "the build did not move": nothing could be read at all, so
+        # claiming the image is still on some build would be inventing a number.
+        $result.Reason = 'unverified'
+        $message = "Packages were added but the image build could not be read back, so the update cannot be confirmed (expected $($update.TargetBuild))."
+        if ($RequireUpdate) { throw $message }
+        Write-LcuLog $message 'WARN'
     } else {
         $result.Reason = 'build-unchanged'
         $message = "Packages were added but the image build is still $after (expected $($update.TargetBuild))."
