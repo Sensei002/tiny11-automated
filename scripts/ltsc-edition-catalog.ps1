@@ -34,7 +34,7 @@
     .\scripts\ltsc-edition-catalog.ps1
 
 .NOTES
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     License: MIT
 #>
 

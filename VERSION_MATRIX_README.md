@@ -1,7 +1,7 @@
 # Version Matrix Builder
 
 **Automated Windows 11 Release Detection & Build Trigger System**  
-*Author: [kelexine](https://github.com/kelexine)*
+*Author: [Sensei002](https://github.com/Sensei002)*
 
 ---
 
@@ -88,7 +88,7 @@ tiny11-automated/
 
 ```bash
 # Clone your repository
-git clone https://github.com/kelexine/tiny11-automated.git
+git clone https://github.com/Sensei002/tiny11-automated.git
 cd tiny11-automated
 
 # Run setup script
@@ -342,9 +342,9 @@ MIT License - See main repository for details
 ## 🙏 Attribution
 
 - Original Tiny11 builders: [ntdevlabs](https://github.com/ntdevlabs)
-- Version Matrix automation: [kelexine](https://github.com/kelexine)
+- Version Matrix automation: [Sensei002](https://github.com/Sensei002)
 - UUP Dump API: [uupdump.net](https://uupdump.net)
 
 ---
 
-**Made with ❤️ for the Windows community by kelexine**
+**Made with ❤️ for the Windows community by Sensei002**

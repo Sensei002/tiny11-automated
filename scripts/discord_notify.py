@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Discord Notification System for Tiny11 Builds
-Author: kelexine (https://github.com/kelexine)
+Author: Sensei002 (https://github.com/Sensei002)
 """
 
 import os
@@ -102,8 +102,7 @@ class DiscordNotifier:
             'color': self.COLORS.get(color, self.COLORS['info']),
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'footer': {
-                'text': 'Tiny11 Automated Builder • kelexine',
-                'icon_url': 'https://avatars.githubusercontent.com/u/70432347'
+                'text': 'Tiny11 Automated Builder • Sensei002'
             }
         }
 
@@ -118,7 +117,7 @@ class DiscordNotifier:
 
         payload = {
             'username': 'Tiny11 Builder',
-            'avatar_url': 'https://raw.githubusercontent.com/kelexine/tiny11-automated/main/.github/assets/bot-avatar.png',
+            'avatar_url': 'https://raw.githubusercontent.com/Sensei002/tiny11-automated/main/.github/assets/bot-avatar.png',
             'embeds': [embed]
         }
 

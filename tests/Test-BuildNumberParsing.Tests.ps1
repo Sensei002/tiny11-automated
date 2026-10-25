@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Unit tests for Windows build-number extraction in the *-headless.ps1 builder scripts.
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     Run: Invoke-Pester ./tests/Test-BuildNumberParsing.Tests.ps1
 
 .NOTES
@@ -104,7 +104,7 @@ Describe "Consistency across all three maker scripts" {
 }
 
 Describe "Regression: basic image list object has no 'Version' property" {
-    # kelexine: 'Get-WindowsImage -ImagePath $x' (no -Index) returns the basic
+    # Sensei002: 'Get-WindowsImage -ImagePath $x' (no -Index) returns the basic
     # list object (ImageIndex/ImageName/ImageDescription/ImageSize only). Under
     # Set-StrictMode -Version Latest, reading .Version off that object throws
     # "The property 'Version' cannot be found on this object." This regressed

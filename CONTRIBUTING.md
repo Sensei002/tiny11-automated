@@ -2,8 +2,8 @@
 
 Thank you for your interest in contributing to Tiny11 Automated! This project has reached **40,000+ downloads** and maintains a **100% build success rate** thanks to careful automation.
 
-**Author:** kelexine  
-**GitHub:** https://github.com/kelexine/tiny11-automated
+**Author:** Sensei002  
+**GitHub:** https://github.com/Sensei002/tiny11-automated
 
 ---
 
@@ -346,7 +346,7 @@ Look for issues tagged `good first issue`:
 - **GitHub Issues**: Bug reports and feature requests
 - **GitHub Discussions**: General questions and ideas
 - **Discord Server**: [Tiny11 Auto-Builder](https://discord.gg/YOUR_INVITE) (Real-time chat)
-- **SourceForge**: [Download releases](https://sourceforge.net/projects/tiny-11-releases/)
+- **SourceForge**: [Download releases](https://sourceforge.net/projects/tiny11-automated/)
 
 ### Getting Help
 
@@ -375,15 +375,15 @@ By contributing, you agree that your contributions will be licensed under the sa
 ## 🙏 Acknowledgments
 
 - **ntdevlabs** - Original tiny11builder creator
-- **kelexine** - Automation and CI/CD implementation
+- **Sensei002** - Automation and CI/CD implementation
 - **All contributors** - Community improvements
 
 ---
 
 ## 📞 Questions?
 
-- **Author**: kelexine
-- **GitHub**: https://github.com/kelexine
+- **Author**: Sensei002
+- **GitHub**: https://github.com/Sensei002
 - **Email**: [Your contact if desired]
 - **Discord**: [Your Discord if desired]
 

@@ -99,8 +99,8 @@
 
 .NOTES
     Original Author: ntdevlabs
-    Modified by: kelexine (https://github.com/kelexine)
-    GitHub: https://github.com/kelexine/tiny11-automated
+    Modified by: Sensei002 (https://github.com/Sensei002)
+    GitHub: https://github.com/Sensei002/tiny11-automated
     Date: 2025-12-08
 
     License: MIT
@@ -504,7 +504,7 @@ function Resolve-ImageIndex {
     $selectedImage = $images | Where-Object { $_.ImageIndex -eq $script:INDEX }
     Write-Log "Selected: Index $script:INDEX - $($selectedImage.ImageName)"
 
-    # kelexine: the list object from 'Get-WindowsImage -ImagePath' has no 'Version'
+    # Sensei002: the list object from 'Get-WindowsImage -ImagePath' has no 'Version'
     # property - DISM only populates Version/SPBuild/Architecture on the detailed
     # per-index object returned by 'Get-WindowsImage -ImagePath ... -Index N'.
     # Re-query with -Index for build-number extraction. Wrapped in try/catch since
@@ -1536,13 +1536,13 @@ function Apply-RegistryTweaks {
     # Easter Egg / Branding
     Write-Log "Adding Easter Egg branding..."
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticecaption' 'REG_SZ' 'Tiny11 Automated'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticetext' 'REG_SZ' 'This image was built using Tiny11 Automated by kelexine. Enjoy your lightweight Windows experience!'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' 'legalnoticetext' 'REG_SZ' 'This image was built using Tiny11 Automated by Sensei002. Enjoy your lightweight Windows experience!'
     
     # Desktop Context Menu Link
     Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'MUIVerb' 'REG_SZ' 'Tiny11 Automated Info'
     Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'Icon' 'REG_SZ' 'shell32.dll,22'
     Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info' 'Position' 'REG_SZ' 'Bottom'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info\command' '' 'REG_SZ' 'explorer.exe "https://github.com/kelexine/tiny11-automated"'
+    Set-RegistryValue 'HKLM\zSOFTWARE\Classes\DesktopBackground\Shell\Tiny11Info\command' '' 'REG_SZ' 'explorer.exe "https://github.com/Sensei002/tiny11-automated"'
 
     Write-Log "Registry tweaks applied"
 }
@@ -1612,7 +1612,7 @@ function Remove-NonEssentialServices {
 }
 
 function Apply-PerformanceTweaks {
-    # Author: kelexine (https://github.com/kelexine)
+    # Author: Sensei002 (https://github.com/Sensei002)
     # Bakes performance optimizations into the offline image via registry.
     # Covers: Memory, CPU/Scheduler, Storage (NTFS), Network (TCP), Gaming, Boot time.
     # Profile: Aggressive — gaming and VM workloads; requires ≥4 GB RAM.
@@ -1997,7 +1997,7 @@ function Create-TinyISO {
 }
 
 function Write-BuildInfo {
-    # kelexine: emits build metadata JSON so CI can read the real Windows build number
+    # Sensei002: emits build metadata JSON so CI can read the real Windows build number
     param(
         [Parameter(Mandatory=$true)]
         [string]$OutputPath
@@ -2110,7 +2110,7 @@ function Invoke-ImageUpdate {
 #---------[ Main Execution ]---------
 try {
     Write-Log "=== Tiny11 Core Headless Builder Started ===" "INFO"
-    Write-Log "Author: kelexine (https://github.com/kelexine)"
+    Write-Log "Author: Sensei002 (https://github.com/Sensei002)"
     Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk, AccountSetup=$AccountSetup, RemoveDefender=$RemoveDefender"
     if ($GamingProfile) { Write-Log "Gaming profile: ENABLED (HagsMode=$HagsMode)" }
     Write-Log "WARNING: This creates a minimal Windows 11 Core image - NOT for daily use!"

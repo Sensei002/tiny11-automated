@@ -31,7 +31,7 @@
     powershell -ExecutionPolicy Bypass -File C:\Windows\Tiny11Gaming\gaming-firstboot.ps1 -Force
 
 .NOTES
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     License: MIT
 #>
 

@@ -1,13 +1,13 @@
 # Bug Report Template for Tiny11 Automated
-# Author: kelexine
-# GitHub: https://github.com/kelexine/tiny11-automated
+# Author: Sensei002
+# GitHub: https://github.com/Sensei002/tiny11-automated
 
 name: 🐛 Bug Report
 description: Report a bug or issue with Tiny11 Auto-Builder
 title: "[BUG] "
 labels: ["bug", "needs-triage"]
 assignees:
-  - kelexine
+  - Sensei002
 
 body:
   - type: markdown
@@ -226,7 +226,7 @@ body:
         
         ## What Happens Next?
         
-        1. **Triage** (24-48h): kelexine will review and label your issue
+        1. **Triage** (24-48h): Sensei002 will review and label your issue
         2. **Investigation** (3-7 days): We'll investigate and may ask for more info
         3. **Fix** (varies): Depending on complexity, a fix will be developed
         4. **Release** (next release): Fix included in next version

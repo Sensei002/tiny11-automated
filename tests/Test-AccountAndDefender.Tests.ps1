@@ -2,7 +2,7 @@
 .SYNOPSIS
     Unit tests for the local-account setup modes and the Defender removal switch
     added to the *-headless.ps1 builders.
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     Run: Invoke-Pester ./tests/Test-AccountAndDefender.Tests.ps1
 #>
 

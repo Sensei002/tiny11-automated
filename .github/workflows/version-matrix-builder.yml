@@ -1,6 +1,6 @@
 # .github/workflows/version-matrix-builder.yml
 # Automated Windows Release Detection & Build Trigger System
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 
 name: Version Matrix Builder
 
@@ -166,7 +166,7 @@ jobs:
         id: commit_tracking
         run: |
           git config user.name "Version Matrix Bot"
-          git config user.email "bot@kelexine.dev"
+          git config user.email "Sensei002@users.noreply.github.com"
           git add ${{ env.RELEASE_TRACKING_FILE }}
           
           if git commit -m "🤖 Update tracked releases - $(date -u +'%Y-%m-%d %H:%M UTC')"; then

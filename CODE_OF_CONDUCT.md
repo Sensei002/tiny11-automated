@@ -6,8 +6,8 @@ We as members, contributors, and leaders pledge to make participation in **Tiny1
 
 We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
 
-**Author**: kelexine  
-**GitHub**: https://github.com/kelexine/tiny11-automated
+**Author**: Sensei002  
+**GitHub**: https://github.com/Sensei002/tiny11-automated
 
 ---
 
@@ -42,7 +42,7 @@ We pledge to act and interact in ways that contribute to an open, welcoming, div
 
 ### Project Maintainers
 
-Project maintainers (kelexine and approved collaborators) are responsible for:
+Project maintainers (Sensei002 and approved collaborators) are responsible for:
 
 - Clarifying the standards of acceptable behavior
 - Taking appropriate and fair corrective action in response to unacceptable behavior
@@ -85,9 +85,9 @@ This Code of Conduct also applies when an individual is officially representing 
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainer:
 
-- **Email**: frankiekelechi@gmail.com
-- **Discord DM**: kelexine
-- **GitHub**: Private message to @kelexine
+- **GitHub**: [@Sensei002](https://github.com/Sensei002)
+- **Discord DM**: Sensei002
+- **GitHub**: Private message to @Sensei002
 
 All complaints will be reviewed and investigated promptly and fairly.
 
@@ -170,7 +170,7 @@ When a report is received:
 
 If you believe you were unfairly sanctioned:
 
-1. Email frankiekelechi@gmail.com with "Appeal" in subject
+1. Open a report through the Security tab with "Appeal" in the subject
 2. Explain why you believe the decision was incorrect
 3. Provide additional context or evidence
 4. Appeals reviewed within 7 days
@@ -208,7 +208,7 @@ If you believe you were unfairly sanctioned:
 
 ### Disagreements with Maintainer
 
-**If you disagree with kelexine's decisions:**
+**If you disagree with Sensei002's decisions:**
 
 1. ✅ Ask for clarification respectfully
 2. ✅ Provide additional context or evidence
@@ -266,7 +266,7 @@ If you believe you were unfairly sanctioned:
 
 ## Maintainer Commitments
 
-As the project maintainer, kelexine commits to:
+As the project maintainer, Sensei002 commits to:
 
 - **Responding** to reports within 24-48 hours
 - **Being fair** and consistent in enforcement
@@ -324,7 +324,7 @@ This Code of Conduct is adapted from:
 
 If you have questions about this Code of Conduct:
 
-- **Email**: frankiekelechi@gmail.com
+- **GitHub**: [@Sensei002](https://github.com/Sensei002)
 - **GitHub Discussion**: Start a thread in Q&A category
 - **Discord**: Ask in #general
 

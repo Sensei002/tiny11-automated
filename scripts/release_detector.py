@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Windows 11 Release Detection & Monitoring System
-Author: kelexine (https://github.com/kelexine)
+Author: Sensei002 (https://github.com/Sensei002)
 
 Monitors multiple sources for new Windows 11 releases and triggers builds.
 """
@@ -481,7 +481,7 @@ class ReleaseDetector:
 
 ---
 *This issue was automatically created by the Version Matrix Builder*  
-*Author: [kelexine](https://github.com/kelexine)*
+*Author: [Sensei002](https://github.com/Sensei002)*
 """
         
         return {

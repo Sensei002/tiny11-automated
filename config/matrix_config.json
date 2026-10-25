@@ -3,7 +3,7 @@
   "title": "Tiny11 Version Matrix Configuration",
   "description": "Configuration and tracking schema for automated Windows release detection",
   "version": "1.0.0",
-  "author": "kelexine (https://github.com/kelexine)",
+  "author": "Sensei002 (https://github.com/Sensei002)",
   "config": {
     "monitoring": {
       "enabled": true,
@@ -117,7 +117,7 @@
       "sourceforge": {
         "enabled": true,
         "auto_upload": false,
-        "project_name": "tiny-11-releases",
+        "project_name": "tiny11-automated",
         "api_key_secret": "SOURCEFORGE_API_KEY"
       },
       "github_releases": {
@@ -347,8 +347,8 @@
     }
   },
   "notes": {
-    "author": "kelexine",
-    "github": "https://github.com/kelexine/tiny11-automated",
+    "author": "Sensei002",
+    "github": "https://github.com/Sensei002/tiny11-automated",
     "purpose": "Automate detection and building of Tiny11 variants for new Windows releases",
     "license": "MIT"
   }

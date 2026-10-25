@@ -23,7 +23,7 @@
     90-minute build should never fail over a single registry value.
 
 .NOTES
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     License: MIT
 #>
 

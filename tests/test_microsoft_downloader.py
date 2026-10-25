@@ -1,6 +1,6 @@
 # tests/test_microsoft_downloader.py
 # Unit and integration tests for Microsoft Direct Downloader
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 
 import os
 import sys

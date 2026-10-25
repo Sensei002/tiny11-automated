@@ -1,5 +1,5 @@
 # Weekly Summary Workflow
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 # Fires every Sunday at 02:00 UTC via cron, or on-demand via workflow_dispatch.
 # Derives builds_completed / builds_failed from the real GitHub Actions API
 # (last 7 days of build-nano11, build-tiny11, build-tiny11-core runs) instead

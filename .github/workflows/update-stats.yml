@@ -19,7 +19,7 @@ jobs:
         run: |
           START_DATE=$(date -d "2026-01-13" +%Y-%m-%d)
           END_DATE=$(date -u +%Y-%m-%d)
-          STATS=$(curl -s "https://sourceforge.net/projects/tiny-11-releases/files/stats/json?start_date=${START_DATE}&end_date=${END_DATE}")
+          STATS=$(curl -s "https://sourceforge.net/projects/tiny11-automated/files/stats/json?start_date=${START_DATE}&end_date=${END_DATE}")
 
           TOTAL=$(echo "$STATS" | jq -r '.total')
           TOP_COUNTRY=$(echo "$STATS" | jq -r '.summaries.geo.top')

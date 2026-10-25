@@ -1,8 +1,8 @@
 # Security Policy
 
 **Project**: Tiny11 Automated  
-**Author**: kelexine  
-**GitHub**: https://github.com/kelexine/tiny11-automated
+**Author**: Sensei002  
+**GitHub**: https://github.com/Sensei002/tiny11-automated
 
 ---
 
@@ -48,18 +48,14 @@ Tiny11 Automated creates modified Windows 11 ISO images with **40,000+ downloads
 
 **Instead:**
 
-1. **Email (Preferred)**:
-   - Send to: frankiekelechi@gmail.com
+1. **Private GitHub Security Advisory (Preferred)**:
+   - Go to: Security → Advisories → New Draft Advisory
    - Subject: `[SECURITY] Tiny11 Vulnerability Report`
    - Include: Detailed description, reproduction steps, impact assessment
+   - You will be notified automatically when it is picked up
 
-2. **Private GitHub Security Advisory**:
-   - Go to: Security → Advisories → New Draft Advisory
-   - Fill in details
-   - kelexine will be notified automatically
-
-3. **Discord (For Urgent Issues)**:
-   - DM kelexine directly
+2. **Discord (For Urgent Issues)**:
+   - DM Sensei002 directly
    - Use `[SECURITY]` prefix
    - Do not post in public channels
 
@@ -153,8 +149,8 @@ shasum -a 256 Tiny11-*.iso
 1. **Test in VM first** - Use VirtualBox/Hyper-V before bare metal
 2. **Backup data** - Always backup before installing modified Windows
 3. **Verify source** - Only download from official sources:
-   - GitHub: https://github.com/kelexine/tiny11-automated
-   - SourceForge: https://sourceforge.net/projects/tiny-11-releases/
+   - GitHub: https://github.com/Sensei002/tiny11-automated
+   - SourceForge: https://sourceforge.net/projects/tiny11-automated/
 4. **Check signatures** - Verify release authenticity
 5. **Keep updated** - Use latest releases for security patches
 
@@ -292,9 +288,8 @@ These are intentional design decisions users should understand:
 
 ## 📞 Security Contacts
 
-- **Email**: frankiekelechi@gmail.com
-- **GitHub**: @kelexine
-- **Discord**: kelexine (Direct Message)
+- **GitHub**: @Sensei002
+- **Discord**: Sensei002 (Direct Message)
 - **Security Advisory**: GitHub → Security tab
 
 **Response Hours**: UTC+1 (Africa/Lagos timezone)  

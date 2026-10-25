@@ -60,7 +60,7 @@
     .\apply-latest-lcu.ps1 -ImageDir D:\scratchdir -ImageVersion 26300.9457 -DryRun
 
 .NOTES
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     License: MIT
 #>
 

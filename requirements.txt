@@ -1,5 +1,5 @@
 # Minimal Python Dependencies for Tiny11 Version Matrix Builder
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 
 requests>=2.31.0
 playwright>=1.40.0

@@ -26,7 +26,7 @@
     powershell -ExecutionPolicy Bypass -File .\Undo-GamingTweaks.ps1 -Force
 
 .NOTES
-    Author: kelexine (https://github.com/kelexine)
+    Author: Sensei002 (https://github.com/Sensei002)
     License: MIT
 #>
 

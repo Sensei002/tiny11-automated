@@ -1,6 +1,6 @@
 # tests/test_discord_notify.py
 # Unit and integration tests for Discord notification system
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 
 import json
 import os
@@ -329,7 +329,7 @@ class TestNotifyBuildCompleted:
         mock_post.return_value = _ok_response()
         _make_notifier().notify_build_completed(
             "25H2", "Nano", "Home", "42m", "3.20 GB",
-            "https://sourceforge.net/projects/tiny-11-releases/"
+            "https://sourceforge.net/projects/tiny11-automated/"
         )
         fields = mock_post.call_args[1]['json']['embeds'][0]['fields']
         assert any(f['name'] == '📥 Download' for f in fields)
@@ -358,7 +358,7 @@ class TestNotifyBuildFailed:
         _make_notifier().notify_build_failed(
             "25H2", "Nano", "Home",
             "error with ```block```",
-            "https://github.com/kelexine/tiny11-automated/actions/runs/1"
+            "https://github.com/Sensei002/tiny11-automated/actions/runs/1"
         )
         error_field = next(
             f for f in mock_post.call_args[1]['json']['embeds'][0]['fields']
@@ -519,7 +519,7 @@ class TestMain:
             '--data', json.dumps({
                 'version': '25H2', 'build_type': 'Nano', 'edition': 'Home',
                 'error': 'CommandNotFoundException: Remove-RegistryValue',
-                'logs_url': 'https://github.com/kelexine/tiny11-automated/actions/runs/1'
+                'logs_url': 'https://github.com/Sensei002/tiny11-automated/actions/runs/1'
             })
         ])
         assert main() == 0

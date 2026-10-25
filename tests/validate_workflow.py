@@ -11,7 +11,7 @@ It also covers the two LTSC workflows, where the risk is different: the image in
 is not a constant. It has to agree with the catalogue, has to be derived rather than
 typed, and has to be verified against the mounted ISO before the builder runs.
 
-Author: kelexine (https://github.com/kelexine)
+Author: Sensei002 (https://github.com/Sensei002)
 License: MIT
 
 Usage:

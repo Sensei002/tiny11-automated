@@ -1,8 +1,8 @@
 # GitHub Actions Workflow for building Tiny11 Core-Gaming ISO
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 # Description: Fully automated Windows 11 Core ISO processing with the latency-first
 #              Core-Gaming profile layered on top of tiny11coremaker.
-# Repository: https://github.com/kelexine/tiny11-automated
+# Repository: https://github.com/Sensei002/tiny11-automated
 #
 # Everything from "Build and Release Tiny11 Core" is preserved. The extra inputs below
 # map 1:1 onto the groups in config/gaming_profile.json, so any of them can be turned
@@ -874,7 +874,7 @@ jobs:
               edition = "$env:EDITION_NAME"
               duration = $duration
               iso_size = $isoSize
-              download_url = "https://sourceforge.net/projects/tiny-11-releases/"
+              download_url = "https://sourceforge.net/projects/tiny11-automated/"
               preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               gaming_profile = "core-gaming"
@@ -1076,7 +1076,7 @@ jobs:
 
             ### 📦 Build Information
             - **Built with:** [tiny11builder](https://github.com/ntdevlabs/tiny11builder) by ntdevlabs
-            - **Modified by:** [kelexine](https://github.com/kelexine)
+            - **Modified by:** [Sensei002](https://github.com/Sensei002)
             - **Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
             ### 📥 Download
@@ -1185,7 +1185,7 @@ jobs:
           Completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
 
           ---
-          Built by [kelexine](https://github.com/kelexine) | Original by [ntdevlabs](https://github.com/ntdevlabs)
+          Built by [Sensei002](https://github.com/Sensei002) | Original by [ntdevlabs](https://github.com/ntdevlabs)
           "@
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary

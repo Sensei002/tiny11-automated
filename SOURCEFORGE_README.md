@@ -26,15 +26,11 @@ Each folder contains:
 
 ## 🚀 Quick Links
 
-- **GitHub Repository**: [https://github.com/kelexine/tiny11-automated](https://github.com/kelexine/tiny11-automated)
+- **GitHub Repository**: [https://github.com/Sensei002/tiny11-automated](https://github.com/Sensei002/tiny11-automated)
 - **Latest Releases**: Check GitHub for the most recent builds
 - **Documentation**: Full documentation available on GitHub
 - **Issues & Support**: Report issues on GitHub
 
-### 🌐 Landing Pages
-
-- **Tiny11**: [https://kelexine.is-a.dev/tiny11](https://kelexine.is-a.dev/tiny11)
-- **Nano11**: [https://kelexine.is-a.dev/nano11](https://kelexine.is-a.dev/nano11)
 
 ## 📋 Build Types
 
@@ -90,8 +86,8 @@ All builds are created automatically via GitHub Actions with:
 ## 📧 Contact
 
 For questions, issues, or contributions, please use the GitHub repository:
-- Issues: [https://github.com/kelexine/tiny11-automated/issues](https://github.com/kelexine/tiny11-automated/issues)
-- Discussions: [https://github.com/kelexine/tiny11-automated/discussions](https://github.com/kelexine/tiny11-automated/discussions)
+- Issues: [https://github.com/Sensei002/tiny11-automated/issues](https://github.com/Sensei002/tiny11-automated/issues)
+- Discussions: [https://github.com/Sensei002/tiny11-automated/discussions](https://github.com/Sensei002/tiny11-automated/discussions)
 
 ## ⚖️ Disclaimer
 

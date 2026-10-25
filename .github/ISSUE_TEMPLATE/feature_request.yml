@@ -1,13 +1,13 @@
 # Feature Request Template for Tiny11 Automated
-# Author: kelexine
-# GitHub: https://github.com/kelexine/tiny11-automated
+# Author: Sensei002
+# GitHub: https://github.com/Sensei002/tiny11-automated
 
 name: ✨ Feature Request
 description: Suggest a new feature or enhancement
 title: "[FEATURE] "
 labels: ["enhancement", "needs-discussion"]
 assignees:
-  - kelexine
+  - Sensei002
 
 body:
   - type: markdown

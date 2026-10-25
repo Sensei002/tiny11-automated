@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Microsoft Windows Direct Download Link Generator (Playwright)
-Author: kelexine (https://github.com/kelexine)
+Author: Sensei002 (https://github.com/Sensei002)
 
 Uses Playwright browser automation to extract JavaScript-generated direct download links.
 Includes user-agent rotation and random delays to avoid rate limiting.

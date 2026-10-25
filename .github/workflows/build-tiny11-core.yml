@@ -1,7 +1,7 @@
 # GitHub Actions Workflow for building Tiny11 Core ISO
-# Author: kelexine (https://github.com/kelexine)
+# Author: Sensei002 (https://github.com/Sensei002)
 # Description: Fully automated Windows 11 Core ISO processing with tiny11coremaker
-# Repository: https://github.com/kelexine/tiny11-automated
+# Repository: https://github.com/Sensei002/tiny11-automated
 
 name: Build and Release Tiny11 Core
 
@@ -545,7 +545,7 @@ jobs:
               edition = "$env:EDITION_NAME"
               duration = $duration
               iso_size = $isoSize
-              download_url = "https://sourceforge.net/projects/tiny-11-releases/"
+              download_url = "https://sourceforge.net/projects/tiny11-automated/"
               preserve_winre = "true"
               enable_dotnet35 = "${{ inputs.enable_dotnet35 }}"
               windows_build = "$env:WINDOWS_BUILD_NUMBER"
@@ -781,11 +781,11 @@ jobs:
           body: |
             ## 🚀 Tiny11 Core Windows 11 ${{ github.event.inputs.windows_version }} Build
 
-            **Automated build by kelexine's workflow**
+            **Automated build by Sensei002's workflow**
 
             ### 📦 Build Information
             - **Built with:** [tiny11builder](https://github.com/ntdevlabs/tiny11builder) by ntdevlabs
-            - **Modified by:** [kelexine](https://github.com/kelexine)
+            - **Modified by:** [Sensei002](https://github.com/Sensei002)
             - **Build Date:** ${{ github.event.repository.updated_at }}
             - **Workflow Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
@@ -897,7 +897,7 @@ jobs:
           Completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
 
           ---
-          Built by [kelexine](https://github.com/kelexine) | Original by [ntdevlabs](https://github.com/ntdevlabs)
+          Built by [Sensei002](https://github.com/Sensei002) | Original by [ntdevlabs](https://github.com/ntdevlabs)
           "@
 
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $summary

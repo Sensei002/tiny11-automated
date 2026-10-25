@@ -137,7 +137,7 @@ Paste logs here
 
 ## For Maintainer Review
 
-**Checklist for @kelexine:**
+**Checklist for @Sensei002:**
 
 - [ ] Code quality acceptable
 - [ ] Tests pass

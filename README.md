@@ -1,14 +1,12 @@
 # Tiny11 Automated Builder
 
-[![Build Tiny11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11.yml)
-[![Build Tiny11 Core](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core.yml)
-[![Build Nano11](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-nano11.yml)
-[![Build Tiny11 Core-Gaming](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml/badge.svg)](https://github.com/kelexine/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml)
-[![SourceForge Downloads](https://img.shields.io/sourceforge/dt/tiny-11-releases.svg)](https://sourceforge.net/projects/tiny-11-releases/files/latest/download)
+[![Build Tiny11](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11.yml)
+[![Build Tiny11 Core](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core.yml)
+[![Build Nano11](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-nano11.yml)
+[![Build Tiny11 Core-Gaming](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml)
+[![SourceForge Downloads](https://img.shields.io/sourceforge/dt/tiny11-automated.svg)](https://sourceforge.net/projects/tiny11-automated/files/latest/download)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-red?logo=GitHub-Sponsors)](https://github.com/sponsors/kelexine)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/kelexine)
 
 
 [![Code of Conduct](https://img.shields.io/badge/code%20of%20conduct-contributor%20covenant-purple.svg)](CODE_OF_CONDUCT.md)
@@ -102,22 +100,17 @@ tweak set on top of Core for competitive esports. See **[GAMING.md](GAMING.md)**
 
 ### 🙏 Attribution
 
-This project is based on the original [tiny11 builder by ntdevlabs](https://github.com/ntdevlabs/tiny11builder). The headless versions were created by **kelexine** to enable automated CI/CD builds while preserving all original functionality.
+This project is based on the original [tiny11 builder by ntdevlabs](https://github.com/ntdevlabs/tiny11builder). The headless versions were created by **Sensei002** to enable automated CI/CD builds while preserving all original functionality.
 
 ### 📥 Downloads
 
-<a href="https://sourceforge.net/p/tiny-11-releases/"><img alt="Download Tiny 11 Releases" src="https://sourceforge.net/sflogo.php?type=18&amp;group_id=3937094" width=200></a>
-- **Pre-built ISOs**: [SourceForge](https://sourceforge.net/projects/tiny-11-releases/files/) (Primary source)
+<a href="https://sourceforge.net/p/tiny11-automated/"><img alt="Download Tiny 11 Releases" src="https://sourceforge.net/sflogo.php?type=18&amp;group_id=3937094" width=200></a>
+- **Pre-built ISOs**: [SourceForge](https://sourceforge.net/projects/tiny11-automated/files/) (Primary source)
 - **Sensei's Pre Built ISO**: [SourceForge](https://sourceforge.net/projects/tiny11-automated/files/)
-- **Release Notes**: [GitHub Releases](https://github.com/kelexine/tiny11-automated/releases)
-- **Source Code**: [GitHub Repository](https://github.com/kelexine/tiny11-automated)
+- **Release Notes**: [GitHub Releases](https://github.com/Sensei002/tiny11-automated/releases)
+- **Source Code**: [GitHub Repository](https://github.com/Sensei002/tiny11-automated)
 
 > ⚠️ **ISO files are hosted on SourceForge only.** GitHub Releases contains release notes and checksums.
-
-### 🌐 Landing Pages
-
-- **Tiny11 Info**: [https://kelexine.is-a.dev/tiny11](https://kelexine.is-a.dev/tiny11) - Detailed information about standard Tiny11 builds
-- **Nano11 Info**: [https://kelexine.is-a.dev/nano11](https://kelexine.is-a.dev/nano11) - Detailed information about Nano11 extreme minimal builds
 
 
 ### ⚖️ Legal Notice
@@ -143,7 +136,7 @@ Perfect for beginners and automated deployments:
    - Windows ISO URL
    - Edition (Home/Pro/Education)
    - Optional parameters
-5. **Download** ISO from Artifacts or [SourceForge](https://sourceforge.net/projects/tiny-11-releases/)
+5. **Download** ISO from Artifacts or [SourceForge](https://sourceforge.net/projects/tiny11-automated/)
 
 **Build time**: 30-80 minutes depending on variant
 
@@ -1289,8 +1282,8 @@ Get-FileHash -Path "tiny11.iso" -Algorithm SHA256
 ### 🔒 Security Best Practices
 
 ✅ **Download from official sources only**
-  - SourceForge: https://sourceforge.net/projects/tiny-11-releases/
-  - GitHub: https://github.com/kelexine/tiny11-automated
+  - SourceForge: https://sourceforge.net/projects/tiny11-automated/
+  - GitHub: https://github.com/Sensei002/tiny11-automated
 
 ✅ **Verify checksums before installation**
   ```powershell
@@ -1317,7 +1310,7 @@ Get-FileHash -Path "tiny11.iso" -Algorithm SHA256
 
 Found a security issue? **DO NOT create a public GitHub issue!**
 
-📧 **Email**: frankiekelechi@gmail.com  
+🔒 **Report**: [GitHub Security Advisory](https://github.com/Sensei002/tiny11-automated/security/advisories/new)  
 🔒 **Subject**: `[SECURITY] Tiny11 Vulnerability Report`  
 📋 **See**: [SECURITY.md](SECURITY.md) for full disclosure policy
 
@@ -1359,8 +1352,8 @@ We welcome contributions from the community! Tiny11 Automated serves **2,000+ us
 
 ### Ways to Contribute
 
-- 🐛 [Report bugs](https://github.com/kelexine/tiny11-automated/issues/new?template=bug_report.yml)
-- ✨ [Request features](https://github.com/kelexine/tiny11-automated/issues/new?template=feature_request.yml)
+- 🐛 [Report bugs](https://github.com/Sensei002/tiny11-automated/issues/new?template=bug_report.yml)
+- ✨ [Request features](https://github.com/Sensei002/tiny11-automated/issues/new?template=feature_request.yml)
 - 📝 Improve documentation
 - 🧪 Test new builds
 - 💻 Submit pull requests
@@ -1412,9 +1405,9 @@ All contributors are recognized in:
 ### Connect With Us
 
 - **💬 Discord**: [Join our server](https://discord.gg/xy6uRHvrrN) - Real-time chat & support
-- **🗨️ GitHub Discussions**: [Ask questions](https://github.com/kelexine/tiny11-automated/discussions) - Q&A and ideas
-- **🐛 Issue Tracker**: [Report bugs](https://github.com/kelexine/tiny11-automated/issues) - Bug reports only
-- **📥 SourceForge**: [Download releases](https://sourceforge.net/projects/tiny-11-releases/) - Official ISOs
+- **🗨️ GitHub Discussions**: [Ask questions](https://github.com/Sensei002/tiny11-automated/discussions) - Q&A and ideas
+- **🐛 Issue Tracker**: [Report bugs](https://github.com/Sensei002/tiny11-automated/issues) - Bug reports only
+- **📥 SourceForge**: [Download releases](https://sourceforge.net/projects/tiny11-automated/) - Official ISOs
 - **🔔 Release Notifications**: Watch repository → Custom → Releases
 
 ### Community Stats
@@ -1439,7 +1432,7 @@ All contributors are recognized in:
 
 ### Licensing Information
 
-- **Tiny11 Automated** (headless scripts, CI/CD): MIT License © 2025 kelexine
+- **Tiny11 Automated** (headless scripts, CI/CD): MIT License © 2025 Sensei002
 - **Inspired by tiny11builder**: Original concept and interactive scripts by [ntdevlabs](https://github.com/ntdevlabs/tiny11builder), MIT License — the headless automation in this project was built on top of that foundation
 - **Individual files**: See copyright notices in each file
 
@@ -1469,7 +1462,7 @@ All contributors are recognized in:
 
 **This tool is provided "as is" without warranty of any kind, express or implied.**
 
-The authors (kelexine, ntdevlabs) are **NOT responsible** for:
+The authors (Sensei002, ntdevlabs) are **NOT responsible** for:
 
 ❌ System damage from using modified Windows images  
 ❌ Data loss or corruption  
@@ -1495,11 +1488,11 @@ The authors (kelexine, ntdevlabs) are **NOT responsible** for:
 
 ### Official Resources
 
-- **📦 GitHub Repository**: https://github.com/kelexine/tiny11-automated
-- **📥 SourceForge Downloads**: https://sourceforge.net/projects/tiny-11-releases/files/
-- **🐛 Issue Tracker**: https://github.com/kelexine/tiny11-automated/issues
-- **📋 Releases**: https://github.com/kelexine/tiny11-automated/releases (notes only)
-- **💬 Discussions**: https://github.com/kelexine/tiny11-automated/discussions
+- **📦 GitHub Repository**: https://github.com/Sensei002/tiny11-automated
+- **📥 SourceForge Downloads**: https://sourceforge.net/projects/tiny11-automated/files/
+- **🐛 Issue Tracker**: https://github.com/Sensei002/tiny11-automated/issues
+- **📋 Releases**: https://github.com/Sensei002/tiny11-automated/releases (notes only)
+- **💬 Discussions**: https://github.com/Sensei002/tiny11-automated/discussions
 
 ### Related Projects
 
@@ -1509,9 +1502,7 @@ The authors (kelexine, ntdevlabs) are **NOT responsible** for:
 
 ### Author
 
-- **👨‍💻 kelexine**: [GitHub](https://github.com/kelexine) | [Telegram](https://t,me/kelexine2)
-- **✉️ Email**: [Email Me](frankiekelechi@gmail.com)
-- **💖 Sponsor**: [GitHub Sponsors](https://github.com/sponsors/kelexine) or [Buy Me a Coffee](https://buymeacoffee.com/kelexine)
+- **👨‍💻 Sensei002**: [GitHub](https://github.com/Sensei002)
 
 ---
 
