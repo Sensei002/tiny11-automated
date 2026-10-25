@@ -17,15 +17,18 @@
 .PARAMETER Root
     Repository root. Defaults to the parent of this script's folder.
 
-.PARAMETER Variant
-    Variant id to preselect, e.g. 'core-gaming'.
+.PARAMETER Preset
+    Variant id to preselect, e.g. 'core-gaming'. Deliberately not called -Variant:
+    a type-constrained parameter of that name would collide with the
+    `foreach ($variant in $profile.variants)` loops, coercing every variant object
+    to a string.
 
 .EXAMPLE
     .\local\gui.ps1
 #>
 param(
     [string]$Root = (Split-Path -Parent $PSScriptRoot),
-    [string]$Variant = ''
+    [string]$Preset = ''
 )
 
 Set-StrictMode -Version Latest
@@ -46,7 +49,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     }
 
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Root', $Root)
-    if ($Variant) { $arguments += @('-Variant', $Variant) }
+    if ($Preset) { $arguments += @('-Preset', $Preset) }
 
     $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
     Start-Process $shell -Verb RunAs -ArgumentList $arguments | Out-Null
@@ -89,7 +92,7 @@ $xaml = @'
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Tiny11 Local Builder" Height="820" Width="1220" MinHeight="700" MinWidth="1040"
         WindowStartupLocation="CenterScreen" WindowStyle="None" Background="#0A0A0B"
-        FontFamily="Segoe UI" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+        FontFamily="Segoe UI" UseLayoutRounding="True">
 
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0"/>
@@ -106,16 +109,23 @@ $xaml = @'
     <SolidColorBrush x:Key="Muted" Color="#8A8A93"/>
     <SolidColorBrush x:Key="Faint" Color="#5E5E66"/>
 
+    <!-- Line heights are explicit so every line box is a whole number of pixels:
+         under UseLayoutRounding a fractional box gets rounded, which makes row
+         spacing jump between font sizes. -->
     <Style x:Key="H1" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="FontSize" Value="22"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="LineHeight" Value="30"/>
+      <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
     </Style>
 
     <Style x:Key="Body" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource Muted}"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="LineHeight" Value="18"/>
+      <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
     </Style>
 
     <Style x:Key="Section" TargetType="TextBlock">
@@ -123,12 +133,16 @@ $xaml = @'
       <Setter Property="FontSize" Value="10.5"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Margin" Value="0,0,0,10"/>
+      <Setter Property="LineHeight" Value="15"/>
+      <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
     </Style>
 
     <Style x:Key="FieldLabel" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="FontSize" Value="12.5"/>
       <Setter Property="Margin" Value="0,0,0,4"/>
+      <Setter Property="LineHeight" Value="18"/>
+      <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
     </Style>
 
     <Style x:Key="FieldHelp" TargetType="TextBlock">
@@ -136,6 +150,8 @@ $xaml = @'
       <Setter Property="FontSize" Value="11"/>
       <Setter Property="TextWrapping" Value="Wrap"/>
       <Setter Property="Margin" Value="0,4,0,0"/>
+      <Setter Property="LineHeight" Value="16"/>
+      <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
     </Style>
 
     <Style x:Key="BtnPrimary" TargetType="Button">
@@ -267,6 +283,11 @@ $xaml = @'
       </Setter>
     </Style>
 
+    <DataTemplate x:Key="ChoiceTemplate">
+      <TextBlock Text="{Binding Label}" Foreground="{StaticResource Ink}" FontSize="12.5"
+                 LineHeight="18" LineStackingStrategy="BlockLineHeight"/>
+    </DataTemplate>
+
     <Style x:Key="ComboItem" TargetType="ComboBoxItem">
       <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="FontSize" Value="12.5"/>
@@ -293,6 +314,11 @@ $xaml = @'
       <Setter Property="Height" Value="34"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="ItemContainerStyle" Value="{StaticResource ComboItem}"/>
+      <!-- ItemTemplate, not DisplayMemberPath: with a custom ControlTemplate the
+           selection box renders SelectionBoxItem, which only becomes readable when
+           an ItemTemplate is what produces SelectionBoxItemTemplate. DisplayMemberPath
+           leaves it as the raw object and the closed combo shows @{Label=...; Value=...}. -->
+      <Setter Property="ItemTemplate" Value="{StaticResource ChoiceTemplate}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ComboBox">
@@ -487,6 +513,25 @@ $script:State = @{
     LastOutput   = ''
 }
 
+function Get-OptionalProperty {
+    <#
+    .SYNOPSIS
+        Reads a property that the schema is allowed to omit.
+
+    .DESCRIPTION
+        Under Set-StrictMode, touching a property a PSCustomObject does not have
+        throws. Only 'help' is optional in an input definition, but reading it
+        directly would make the whole form fail to render for the inputs that leave
+        it out.
+    #>
+    param($Object, [string]$Name, $Default = $null)
+
+    if ($null -eq $Object) { return $Default }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($property) { return $property.Value }
+    return $Default
+}
+
 function New-Text {
     param([string]$Text, [string]$Style = 'Body', [double]$Top = 0)
     $block = New-Object System.Windows.Controls.TextBlock
@@ -502,7 +547,6 @@ function New-Combo {
     $combo = New-Object System.Windows.Controls.ComboBox
     $combo.Style = $window.Resources['Combo']
     $combo.ItemsSource = $Items
-    $combo.DisplayMemberPath = 'Label'
     $combo.SelectedValuePath = 'Value'
     if ($Selected) { $combo.SelectedValue = $Selected }
     if ($combo.SelectedIndex -lt 0 -and $Items.Count -gt 0) { $combo.SelectedIndex = 0 }
@@ -510,12 +554,12 @@ function New-Combo {
 }
 
 function Get-ChoiceItems {
-    param($Input, $Profile)
-    switch ($Input.type) {
+    param($Spec, $Profile)
+    switch ($Spec.type) {
         'imageIndex'   { return @($Profile.imageIndexes | ForEach-Object { [pscustomobject]@{ Label = $_.label; Value = $_.value } }) }
         'language'     { return @($Profile.languages | ForEach-Object { [pscustomobject]@{ Label = $_; Value = $_ } }) }
         'ltscEdition'  { return @($Profile.ltscEditions | ForEach-Object { [pscustomobject]@{ Label = $_; Value = $_ } }) }
-        default        { return @($Input.options | ForEach-Object { [pscustomobject]@{ Label = $_.label; Value = $_.value } }) }
+        default        { return @($Spec.options | ForEach-Object { [pscustomobject]@{ Label = $_.label; Value = $_.value } }) }
     }
 }
 
@@ -559,10 +603,6 @@ function Show-Variant {
     $controls['VariantTitle'].Text = $Variant.label
     $controls['VariantDescription'].Text = $Variant.description
 
-    foreach ($child in @($controls['VariantList'].Children)) { $child.Tag = $false }
-    foreach ($card in @($controls['VariantList'].Children)) {
-        if ($card.Name -eq "card-$($Variant.id)") { $card.Tag = $true }
-    }
     Update-VariantCards
 
     $panelHost = $controls['SettingsHost']
@@ -605,18 +645,19 @@ function Show-Variant {
     $inputHeader.Margin = New-Object System.Windows.Thickness(0, 12, 0, 10)
     $panelHost.Children.Add($inputHeader) | Out-Null
 
-    foreach ($input in $Variant.inputs) {
-        switch ($input.type) {
+    foreach ($inputDef in $Variant.inputs) {
+        $helpText = Get-OptionalProperty -Object $inputDef -Name 'help'
+        switch ($inputDef.type) {
             'bool' {
                 $check = New-Object System.Windows.Controls.CheckBox
                 $check.Style = $window.Resources['Switch']
-                $check.Content = $input.label
-                $check.IsChecked = [bool]$input.default
-                $script:State.Fields[$input.key] = $check
-                $panelHost.Children.Add((Add-Field -Element $check -Help $input.help)) | Out-Null
+                $check.Content = $inputDef.label
+                $check.IsChecked = [bool]$inputDef.default
+                $script:State.Fields[$inputDef.key] = $check
+                $panelHost.Children.Add((Add-Field -Element $check -Help $helpText)) | Out-Null
             }
             'group' {
-                $header = New-Text -Text $input.label.ToUpperInvariant() -Style 'Section'
+                $header = New-Text -Text $inputDef.label.ToUpperInvariant() -Style 'Section'
                 $header.Margin = New-Object System.Windows.Thickness(0, 8, 0, 10)
                 $panelHost.Children.Add($header) | Out-Null
 
@@ -635,19 +676,19 @@ function Show-Variant {
                     $grid.Children.Add($check) | Out-Null
                 }
                 $panelHost.Children.Add($grid) | Out-Null
-                if ($input.help) { $panelHost.Children.Add((New-Text -Text $input.help -Style 'FieldHelp')) | Out-Null }
+                if ($helpText) { $panelHost.Children.Add((New-Text -Text $helpText -Style 'FieldHelp')) | Out-Null }
             }
             'text' {
                 $box = New-Object System.Windows.Controls.TextBox
                 $box.Style = $window.Resources['TxtInput']
-                $box.Text = [string]$input.default
-                $script:State.Fields[$input.key] = $box
-                $panelHost.Children.Add((Add-Field -Element $box -Label $input.label -Help $input.help)) | Out-Null
+                $box.Text = [string]$inputDef.default
+                $script:State.Fields[$inputDef.key] = $box
+                $panelHost.Children.Add((Add-Field -Element $box -Label $inputDef.label -Help $helpText)) | Out-Null
             }
             default {
-                $combo = New-Combo -Items (Get-ChoiceItems -Input $input -Profile $profile) -Selected ([string]$input.default)
-                $script:State.Fields[$input.key] = $combo
-                $panelHost.Children.Add((Add-Field -Element $combo -Label $input.label -Help $input.help)) | Out-Null
+                $combo = New-Combo -Items (Get-ChoiceItems -Spec $inputDef -Profile $profile) -Selected ([string]$inputDef.default)
+                $script:State.Fields[$inputDef.key] = $combo
+                $panelHost.Children.Add((Add-Field -Element $combo -Label $inputDef.label -Help $helpText)) | Out-Null
             }
         }
     }
@@ -731,7 +772,7 @@ function Update-VariantCards {
     $activeFill = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#1A0F12')
 
     foreach ($card in @($controls['VariantList'].Children)) {
-        if ([bool]$card.Tag) {
+        if ([string]$card.Tag -eq $script:State.Selected.id) {
             $card.Background = $activeFill
             $card.BorderBrush = $accent
         } else {
@@ -1031,8 +1072,9 @@ function Start-Build {
 
 foreach ($variant in $profile.variants) {
     $card = New-Object System.Windows.Controls.Border
-    $card.Name = "card-$($variant.id)"
-    $card.Tag = $false
+    # Tag carries the variant id: WPF's Name property rejects anything that is not a
+    # valid identifier, and 'core-gaming' is not one.
+    $card.Tag = $variant.id
     $card.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#141417')
     $card.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#232328')
     $card.BorderThickness = New-Object System.Windows.Thickness(1)
@@ -1094,8 +1136,8 @@ $timer.Add_Tick({
 $script:State.Timer = $timer
 
 $initial = $profile.variants[0]
-if ($Variant) {
-    $wanted = $profile.variants | Where-Object { $_.id -eq $Variant } | Select-Object -First 1
+if ($Preset) {
+    $wanted = $profile.variants | Where-Object { $_.id -eq $Preset } | Select-Object -First 1
     if ($wanted) { $initial = $wanted }
 }
 Show-Variant $initial
