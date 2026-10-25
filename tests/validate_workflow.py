@@ -360,6 +360,102 @@ def validate_dispatch_input_counts() -> None:
             print(f"[ok]   {name}: {count} input(s) (limit {limit})")
 
 
+def validate_local_build_profiles() -> None:
+    """The local GUI's schema must stay a subset of the workflows it mirrors.
+
+    config/local_build_profiles.json is what the GUI renders, and it names workflow
+    inputs directly. Renaming an input in a workflow, or adding a variant that points
+    at the wrong workflow, would otherwise only show up as a missing value at build
+    time - an hour in, after the ISO download.
+
+    Pester checks the other half of this contract (the paramMap targets really exist
+    in the builder's param block); YAML parsing has to happen here.
+    """
+    print()
+    print("local build profiles")
+
+    import json  # noqa: PLC0415
+
+    path = REPO_ROOT / "config" / "local_build_profiles.json"
+    if not path.exists():
+        problems.append("config/local_build_profiles.json is missing")
+        print("[FAIL] config/local_build_profiles.json is missing")
+        return
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            profile = json.load(fh)
+    except Exception as exc:  # noqa: BLE001
+        problems.append(f"local_build_profiles.json is not valid JSON: {exc}")
+        print(f"[FAIL] not valid JSON: {exc}")
+        return
+
+    source_ids = {item.get("id") for item in profile.get("isoSources") or []}
+    variants = profile.get("variants") or []
+    if not variants:
+        problems.append("local_build_profiles.json declares no variants")
+        print("[FAIL] declares no variants")
+        return
+
+    for variant in variants:
+        vid = variant.get("id", "<unnamed>")
+        workflow = variant.get("workflow")
+        if not workflow:
+            problems.append(f"{vid} has no workflow")
+            print(f"[FAIL] {vid}: no workflow")
+            continue
+
+        wf_path = WORKFLOWS / workflow
+        if not wf_path.exists():
+            problems.append(f"{vid} points at missing workflow {workflow}")
+            print(f"[FAIL] {vid}: missing {workflow}")
+            continue
+
+        try:
+            declared = inputs_of(load_yaml(wf_path))
+        except Exception as exc:  # noqa: BLE001
+            problems.append(f"{workflow} is not valid YAML: {exc}")
+            print(f"[FAIL] {workflow}: not valid YAML")
+            continue
+
+        wanted = set()
+        composed = {}
+        for item in variant.get("inputs") or []:
+            source = item.get("composedFrom")
+            if source:
+                # One GUI control over several workflow inputs, e.g. the 14 gaming
+                # toggles. Each member still has to exist in the workflow.
+                members = {entry.get("value") for entry in profile.get(source) or []}
+                composed[item.get("key")] = members
+                wanted |= members
+            else:
+                wanted.add(item.get("key"))
+
+        unknown = sorted(wanted - declared)
+        if unknown:
+            problems.append(
+                f"{vid} uses inputs {workflow} does not declare: {', '.join(unknown)}"
+            )
+            print(f"[FAIL] {vid}: {workflow} does not declare {', '.join(unknown)}")
+            continue
+
+        # A variant may narrow the sources (LTSC cannot be downloaded), never widen.
+        allowed = variant.get("isoSources")
+        if allowed:
+            stray = sorted(set(allowed) - source_ids)
+            if stray:
+                problems.append(f"{vid} allows unknown iso source(s): {', '.join(stray)}")
+                print(f"[FAIL] {vid}: unknown iso source(s) {', '.join(stray)}")
+                continue
+
+        detail = f"{len(wanted)} input(s)"
+        if composed:
+            detail += ", " + ", ".join(
+                f"{len(members)} composed into {key}" for key, members in composed.items()
+            )
+        print(f"[ok]   {vid}: {detail} match {workflow}")
+
+
 def main() -> int:
     print("=" * 68)
     print("Workflow validation")
@@ -456,6 +552,7 @@ def main() -> int:
     validate_ltsc_workflows()
     validate_sourceforge_folders()
     validate_dispatch_input_counts()
+    validate_local_build_profiles()
 
     print()
     print("=" * 68)

@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "schemaVersion": 1,
+  "description": "Single source of truth for the local GUI builder. Every build variant the CI offers is described here once: the builder it drives, the inputs the form shows, and a declarative paramMap onto that builder's PowerShell parameters. tests/Test-LocalGui.Tests.ps1 asserts the paramMap targets really exist in the builder's param block and that every input key exists in the matching workflow, so this file cannot drift silently from either side.",
+
+  "app": {
+    "name": "Tiny11 Local Builder",
+    "tagline": "Build Tiny11 ISOs on your own machine",
+    "repo": "Sensei002/tiny11-automated"
+  },
+
+  "defaults": {
+    "isoSource": "download",
+    "updateMode": "best-effort",
+    "outputDir": "%USERPROFILE%\\Downloads",
+    "scratchDrive": ""
+  },
+
+  "isoSources": [
+    {
+      "id": "download",
+      "label": "Download from Microsoft",
+      "help": "Mints a fresh signed link at build time (~5.8 GB). Links expire after ~24 hours, so this is safer than pasting one."
+    },
+    {
+      "id": "file",
+      "label": "Use an ISO file on this PC",
+      "help": "Pick a .iso already on disk. Skips the download entirely and works offline."
+    },
+    {
+      "id": "mounted",
+      "label": "Use a mounted drive",
+      "help": "Point at a drive letter that already has the Windows media mounted."
+    }
+  ],
+
+  "updateModes": [
+    {
+      "id": "required",
+      "label": "Required",
+      "help": "Download and inject the newest cumulative update before debloating. The build fails if it cannot be applied.",
+      "updateToLatest": true,
+      "requireLatestUpdate": true
+    },
+    {
+      "id": "best-effort",
+      "label": "Best effort",
+      "help": "Try to inject the newest cumulative update, but keep going at the base build if it fails.",
+      "updateToLatest": true,
+      "requireLatestUpdate": false
+    },
+    {
+      "id": "off",
+      "label": "Off",
+      "help": "Build from the ISO exactly as Microsoft shipped it.",
+      "updateToLatest": false,
+      "requireLatestUpdate": false
+    }
+  ],
+
+  "imageIndexes": [
+    { "value": "1", "label": "Home" },
+    { "value": "4", "label": "Education" },
+    { "value": "6", "label": "Pro" },
+    { "value": "7", "label": "Pro N" }
+  ],
+
+  "languages": [
+    "Arabic", "Brazilian Portuguese", "Bulgarian", "Chinese Simplified",
+    "Chinese Traditional", "Croatian", "Czech", "Danish", "Dutch",
+    "English (United States)", "English International", "Estonian", "Finnish",
+    "French", "French Canadian", "German", "Greek", "Hebrew", "Hungarian",
+    "Italian", "Japanese", "Korean", "Latvian", "Lithuanian", "Norwegian",
+    "Polish", "Portuguese", "Romanian", "Russian", "Serbian Latin", "Slovak",
+    "Slovenian", "Spanish", "Spanish (Mexico)", "Swedish", "Thai", "Turkish",
+    "Ukrainian"
+  ],
+
+  "ltscEditions": [
+    "Windows 11 Enterprise LTSC",
+    "Windows 11 IoT Enterprise LTSC",
+    "Windows 11 IoT Enterprise Subscription LTSC",
+    "Windows 10 Enterprise LTSC",
+    "Windows 10 IoT Enterprise LTSC"
+  ],
+
+  "gamingGroups": [
+    { "value": "atlas_power_scheme", "label": "Atlas power scheme", "default": true, "help": "Imports the latency-first power plan." },
+    { "value": "disable_cpu_idle", "label": "Disable CPU idle states", "default": false, "help": "Can raise idle power draw and temperatures." },
+    { "value": "disable_security_mitigations", "label": "Disable security mitigations", "default": true, "help": "Trades Spectre/Meltdown class protections for throughput." },
+    { "value": "remove_xbox_gaming_stack", "label": "Remove Xbox / Game Bar stack", "default": true, "help": "Drops GameDVR, Game Bar and the Xbox services." },
+    { "value": "strip_background_noise", "label": "Strip background noise", "default": true, "help": "Telemetry and scheduled maintenance tasks." },
+    { "value": "instant_windows", "label": "Instant window animations", "default": true, "help": "Removes window animation delays." },
+    { "value": "disable_fast_startup", "label": "Disable fast startup", "default": true, "help": "Fast startup breaks true shutdowns and dual-boot." },
+    { "value": "network_latency_tweaks", "label": "Network latency tweaks", "default": true, "help": "Disables Nagle-style batching and throttling." },
+    { "value": "disable_mpo", "label": "Disable MPO", "default": true, "help": "Multi-Plane Overlay off; fixes some flicker and stutter." },
+    { "value": "latency_input_tweaks", "label": "Input latency tweaks", "default": true, "help": "Mouse/keyboard polling and queue behaviour." },
+    { "value": "interrupt_latency", "label": "Interrupt latency", "default": true, "help": "Timer resolution and interrupt steering." },
+    { "value": "disable_fso", "label": "Disable fullscreen optimisations", "default": true, "help": "Forces true exclusive fullscreen in older titles." },
+    { "value": "disable_game_mode", "label": "Disable Game Mode", "default": true, "help": "Windows Game Mode off; the profile does its own scheduling." },
+    { "value": "disable_printing", "label": "Remove printing", "default": true, "help": "Drops the print spooler and drivers." }
+  ],
+
+  "variants": [
+    {
+      "id": "standard",
+      "label": "Tiny11",
+      "subtitle": "Standard",
+      "workflow": "build-tiny11.yml",
+      "builder": "scripts/tiny11maker-headless.ps1",
+      "outputIso": "tiny11.iso",
+      "description": "The full Tiny11 treatment: bloatware and telemetry removed, but Windows Update, Defender and the usual services stay intact. The everyday-driver build.",
+      "inputs": [
+        { "key": "windows_version", "label": "Windows version", "type": "text", "default": "26H2", "help": "Label only - the real build is read from the ISO." },
+        { "key": "image_index", "label": "Edition", "type": "imageIndex", "default": "1" },
+        { "key": "language", "label": "Language", "type": "language", "default": "English (United States)" },
+        { "key": "account_setup", "label": "Account setup", "type": "choice", "default": "auto-admin", "param": "AccountSetup", "paramType": "string",
+          "options": [
+            { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
+            { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
+          ] },
+        { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
+      ],
+      "paramMap": {
+        "ISO": "isoDrive:string",
+        "INDEX": "image_index:int",
+        "SCRATCH": "scratchDrive:string",
+        "SkipCleanup": "skip_cleanup:switch",
+        "UpdateToLatest": "updateToLatest:switch",
+        "RequireLatestUpdate": "requireLatestUpdate:switch"
+      }
+    },
+
+    {
+      "id": "core",
+      "label": "Tiny11 Core",
+      "subtitle": "Minimal",
+      "workflow": "build-tiny11-core.yml",
+      "builder": "scripts/tiny11coremaker-headless.ps1",
+      "outputIso": "tiny11-core.iso",
+      "description": "Strips the component store and the servicing stack down to the bone. Smallest footprint that still installs, but Windows Update is effectively gone. Not for daily use.",
+      "inputs": [
+        { "key": "windows_version", "label": "Windows version", "type": "text", "default": "26H2", "help": "Label only - the real build is read from the ISO." },
+        { "key": "image_index", "label": "Edition", "type": "imageIndex", "default": "1" },
+        { "key": "language", "label": "Language", "type": "language", "default": "English (United States)" },
+        { "key": "enable_dotnet35", "label": "Enable .NET Framework 3.5", "type": "bool", "default": false, "param": "ENABLE_DOTNET35", "paramType": "switch", "help": "Needed by some older games and line-of-business apps." },
+        { "key": "remove_defender", "label": "Remove Windows Defender entirely", "type": "bool", "default": false, "param": "RemoveDefender", "paramType": "switch", "help": "The standard Core build only disables Defender. This deletes it." },
+        { "key": "account_setup", "label": "Account setup", "type": "choice", "default": "auto-admin", "param": "AccountSetup", "paramType": "string",
+          "options": [
+            { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
+            { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
+          ] },
+        { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
+      ],
+      "paramMap": {
+        "ISO": "isoDrive:string",
+        "INDEX": "image_index:int",
+        "SCRATCH": "scratchDrive:string",
+        "SkipCleanup": "skip_cleanup:switch",
+        "UpdateToLatest": "updateToLatest:switch",
+        "RequireLatestUpdate": "requireLatestUpdate:switch",
+        "ENABLE_DOTNET35": "enable_dotnet35:switch",
+        "RemoveDefender": "remove_defender:switch",
+        "AccountSetup": "account_setup:string"
+      }
+    },
+
+    {
+      "id": "core-gaming",
+      "label": "Tiny11 Core-Gaming",
+      "subtitle": "Latency first",
+      "workflow": "build-tiny11-core-gaming.yml",
+      "builder": "scripts/tiny11coremaker-headless.ps1",
+      "outputIso": "tiny11-core.iso",
+      "description": "Core plus the AtlasOS-style gaming profile: latency-first power plan, security mitigations off, Xbox stack removed. Always removes Defender and the Windows Update stack.",
+      "inputs": [
+        { "key": "windows_version", "label": "Windows version", "type": "text", "default": "26H2", "help": "Label only - the real build is read from the ISO." },
+        { "key": "image_index", "label": "Edition", "type": "imageIndex", "default": "1" },
+        { "key": "language", "label": "Language", "type": "language", "default": "English (United States)" },
+        { "key": "hags", "label": "GPU hardware scheduling", "type": "choice", "default": "on", "param": "HagsMode", "paramType": "string",
+          "options": [
+            { "value": "on", "label": "On - force it on" },
+            { "value": "off", "label": "Off - force it off" },
+            { "value": "leave", "label": "Leave - keep the Core default" }
+          ] },
+        { "key": "enable_dotnet35", "label": "Enable .NET Framework 3.5", "type": "bool", "default": false, "param": "ENABLE_DOTNET35", "paramType": "switch", "help": "Needed by some older games." },
+        { "key": "account_setup", "label": "Account setup", "type": "choice", "default": "auto-admin", "param": "AccountSetup", "paramType": "string",
+          "options": [
+            { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
+            { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
+          ] },
+        { "key": "gaming_groups", "label": "Gaming tweaks", "type": "group", "param": "GamingGroups", "paramType": "hashtable", "composedFrom": "gamingGroups", "help": "Each toggle maps to a group in config/gaming_profile.json." },
+        { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
+      ],
+      "paramMap": {
+        "ISO": "isoDrive:string",
+        "INDEX": "image_index:int",
+        "SCRATCH": "scratchDrive:string",
+        "SkipCleanup": "skip_cleanup:switch",
+        "UpdateToLatest": "updateToLatest:switch",
+        "RequireLatestUpdate": "requireLatestUpdate:switch",
+        "ENABLE_DOTNET35": "enable_dotnet35:switch",
+        "AccountSetup": "account_setup:string",
+        "GamingProfile": "@static:switch",
+        "GamingGroups": "gaming_groups:hashtable",
+        "HagsMode": "hags:string"
+      }
+    },
+
+    {
+      "id": "nano",
+      "label": "Nano11",
+      "subtitle": "Experimental",
+      "workflow": "build-nano11.yml",
+      "builder": "scripts/nano11builder-headless.ps1",
+      "outputIso": "nano11.iso",
+      "description": "The most aggressive strip in the repo. Expect things to be missing; it exists to find out how little Windows 11 can be.",
+      "inputs": [
+        { "key": "windows_version", "label": "Windows version", "type": "text", "default": "26H2", "help": "Label only - the real build is read from the ISO." },
+        { "key": "image_index", "label": "Edition", "type": "imageIndex", "default": "1" },
+        { "key": "language", "label": "Language", "type": "language", "default": "English (United States)" },
+        { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
+      ],
+      "paramMap": {
+        "ISO": "isoDrive:string",
+        "INDEX": "image_index:int",
+        "SCRATCH": "scratchDrive:string",
+        "SkipCleanup": "skip_cleanup:switch",
+        "UpdateToLatest": "updateToLatest:switch",
+        "RequireLatestUpdate": "requireLatestUpdate:switch"
+      }
+    },
+
+    {
+      "id": "ltsc",
+      "label": "Tiny11 LTSC",
+      "subtitle": "Long-term servicing",
+      "workflow": "build-tiny11-ltsc.yml",
+      "builder": "scripts/tiny11maker-headless.ps1",
+      "outputIso": "tiny11.iso",
+      "description": "LTSC media with the Tiny11 treatment. No Store, no Copilot, no feature updates - supported for years instead of months.",
+      "isoSources": ["file", "mounted"],
+      "isoNote": "Microsoft does not publish LTSC ISOs on the consumer download page, so you must supply your own ISO or mounted drive.",
+      "derived": ["image_index"],
+      "derivedNote": "The image index comes from the LTSC catalogue entry, not from a form field: LTSC media numbers its images differently from the consumer ISO, and the builder re-checks the name via -ExpectedEdition anyway.",
+      "inputs": [
+        { "key": "ltsc_edition", "label": "LTSC edition", "type": "ltscEdition", "default": "Windows 11 IoT Enterprise LTSC", "param": "ExpectedEdition", "paramType": "string", "help": "Also decides the image index, because LTSC media orders its images differently." },
+        { "key": "account_setup", "label": "Account setup", "type": "choice", "default": "auto-admin", "param": "AccountSetup", "paramType": "string",
+          "options": [
+            { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
+            { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
+          ] },
+        { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
+      ],
+      "paramMap": {
+        "ISO": "isoDrive:string",
+        "INDEX": "image_index:int",
+        "SCRATCH": "scratchDrive:string",
+        "SkipCleanup": "skip_cleanup:switch",
+        "UpdateToLatest": "updateToLatest:switch",
+        "RequireLatestUpdate": "requireLatestUpdate:switch",
+        "AccountSetup": "account_setup:string",
+        "ExpectedEdition": "ltsc_edition:string"
+      }
+    },
+
+    {
+      "id": "core-ltsc",
+      "label": "Tiny11 Core LTSC",
+      "subtitle": "Minimal + long-term",
+      "workflow": "build-tiny11-core-ltsc.yml",
+      "builder": "scripts/tiny11coremaker-headless.ps1",
+      "outputIso": "tiny11-core.iso",
+      "description": "Core strip applied to LTSC media. The smallest long-lived image the repo can produce.",
+      "isoSources": ["file", "mounted"],
+      "isoNote": "Microsoft does not publish LTSC ISOs on the consumer download page, so you must supply your own ISO or mounted drive.",
+      "derived": ["image_index"],
+      "derivedNote": "The image index comes from the LTSC catalogue entry, not from a form field: LTSC media numbers its images differently from the consumer ISO, and the builder re-checks the name via -ExpectedEdition anyway.",
+      "inputs": [
+        { "key": "ltsc_edition", "label": "LTSC edition", "type": "ltscEdition", "default": "Windows 11 IoT Enterprise LTSC", "param": "ExpectedEdition", "paramType": "string", "help": "Also decides the image index, because LTSC media orders its images differently." },
+        { "key": "enable_dotnet35", "label": "Enable .NET Framework 3.5", "type": "bool", "default": false, "param": "ENABLE_DOTNET35", "paramType": "switch", "help": "Needed by some older games and line-of-business apps." },
+        { "key": "remove_defender", "label": "Remove Windows Defender entirely", "type": "bool", "default": false, "param": "RemoveDefender", "paramType": "switch", "help": "The standard Core build only disables Defender. This deletes it." },
+        { "key": "account_setup", "label": "Account setup", "type": "choice", "default": "auto-admin", "param": "AccountSetup", "paramType": "string",
+          "options": [
+            { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
+            { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
+          ] },
+        { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
+      ],
+      "paramMap": {
+        "ISO": "isoDrive:string",
+        "INDEX": "image_index:int",
+        "SCRATCH": "scratchDrive:string",
+        "SkipCleanup": "skip_cleanup:switch",
+        "UpdateToLatest": "updateToLatest:switch",
+        "RequireLatestUpdate": "requireLatestUpdate:switch",
+        "ENABLE_DOTNET35": "enable_dotnet35:switch",
+        "RemoveDefender": "remove_defender:switch",
+        "AccountSetup": "account_setup:string",
+        "ExpectedEdition": "ltsc_edition:string"
+      }
+    }
+  ]
+}
