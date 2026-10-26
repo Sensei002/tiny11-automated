@@ -1899,6 +1899,55 @@ function Assert-InstallImageRecoveryConsistent {
     }
 }
 
+function Assert-WindowsUpdateLockdown {
+    # -GamingProfile only. Fails the build unless the mounted image actually carries
+    # the Windows Update lockdown.
+    #
+    # Every write in the removal passes is best-effort against a hive and a task tree
+    # that Windows treats as system-owned: Remove-Item runs with
+    # -ErrorAction SilentlyContinue and a registry write can be denied, so a build
+    # that removed nothing logs exactly like a build that removed everything. A
+    # shipped Core-Gaming image was found with wuauserv back at Start=3 and
+    # InstallService\ScanForUpdates still registered, and there was no line anywhere
+    # in the build log to suggest a pass had failed.
+    #
+    # So read the state back instead of trusting the passes. This runs after every
+    # service and task pass, which is the last moment the hives are loaded and the
+    # state is still authoritative.
+    #
+    # Failing here is the point. A build that cannot remove the task folders needs
+    # the ownership/ACL problem fixed, not a warning that scrolls past in CI.
+    param([Parameter(Mandatory = $true)][string]$MountDir)
+
+    Write-Log "Verifying the Windows Update lockdown in the mounted image"
+
+    $bad = @()
+    foreach ($svc in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
+        $key = "HKLM:\zSYSTEM\ControlSet001\Services\$svc"
+        if (-not (Test-Path $key)) {
+            $bad += "$svc service key missing"
+            continue
+        }
+        $start = (Get-ItemProperty -Path $key -Name 'Start' -ErrorAction SilentlyContinue).Start
+        if ($start -ne 4) { $bad += "$svc Start=$start (expected 4)" }
+    }
+
+    $taskRoot = Join-Path $MountDir 'Windows\System32\Tasks\Microsoft\Windows'
+    foreach ($folder in @('WaaSMedic', 'UpdateOrchestrator', 'WindowsUpdate', 'InstallService')) {
+        if (Test-Path -LiteralPath (Join-Path $taskRoot $folder)) {
+            $bad += "task folder survives: $folder"
+        }
+    }
+
+    if ($bad.Count -gt 0) {
+        throw ("Windows Update lockdown did not land in the image: " + ($bad -join '; ') +
+            ". This ISO would ship with Windows Update still able to scan. Refusing to build it - " +
+            "check the removal passes for a denied registry write or a task folder that could not be deleted.")
+    }
+
+    Write-Log "Windows Update lockdown verified: 3 services at Start=4, 4 task folders absent" "SUCCESS"
+}
+
 function Create-TinyISO {
     Write-Log "Creating ISO image..."
 
@@ -2256,6 +2305,13 @@ try {
 
     if ($GamingProfile) {
         Invoke-GamingServiceTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
+    }
+
+    # Gaming profile: read the lockdown back while the hives are still loaded and every
+    # service/task pass has run. Fails the build rather than shipping an ISO whose
+    # Windows Update removal silently did nothing.
+    if ($GamingProfile) {
+        Assert-WindowsUpdateLockdown -MountDir $scratchDir
     }
 
     Unload-RegistryHives

@@ -191,6 +191,87 @@ Describe 'Windows Update stays gone' {
         $code | Should -Match 'DisableWindowsUpdateAccess'
         $code | Should -Match 'NoAutoUpdate'
     }
+
+    It 're-asserts the lockdown on the target, after the boot servicing pass' {
+        # The offline pass writes Start=4 into the mounted hive and deletes the task
+        # folders. The first online boot's servicing pass then re-registers inbox
+        # service start types from the component manifests. A shipped Core-Gaming
+        # image came up with wuauserv at Start=3 and InstallService\ScanForUpdates
+        # live - UsoSvc stayed at 4, which is why it looked half-removed - and the
+        # client scanned and staged 17 updates before the user did anything.
+        #
+        # The builder therefore cannot be the last word. The first-boot payload has
+        # to write the same state again on the target, or the image only *looks*
+        # debloated until the machine sees a network.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match 'function\s+Restore-WindowsUpdateLockdown'
+        $code | Should -Match '(?m)^\s*Restore-WindowsUpdateLockdown\s*$'
+        foreach ($svc in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
+            $code | Should -Match ([regex]::Escape($svc))
+        }
+    }
+
+    It 'runs the re-assert before the power scheme is rebuilt' {
+        # Ordering matters: 'powercfg -h off' and the scheme rebuild are the longest
+        # part of the payload, and the window between the servicing pass and this
+        # call is the only one where a scan can start.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $call = [regex]::Match($code, '(?m)^\s*Restore-WindowsUpdateLockdown\s*$')
+        $power = [regex]::Match($code, '(?m)^\s*\$schemeGuid = New-GamingPowerScheme')
+        $call.Success | Should -BeTrue
+        $power.Success | Should -BeTrue
+        $call.Index | Should -BeLessThan $power.Index
+    }
+
+    It 'merges SettingsPageVisibility instead of overwriting it' {
+        # This value is the only thing that makes the Settings page disappear, and it
+        # is the first thing a debloat playbook rewrites. The ReviOS playbook replaces
+        # it with its own list that does not mention windowsupdate, so the page comes
+        # back on a machine whose services are still disabled - and a blind write from
+        # our side loses the playbook's list the same way. Merge both.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match "Get-ItemProperty[^\r\n]*SettingsPageVisibility"
+        $code | Should -Not -Match "SettingsPageVisibility'\s+-Value\s+'hide:"
+    }
+
+    It 'registers a transient boot guard instead of trusting one re-assert' {
+        # SetupComplete runs once, before the first logon. On the reference install the
+        # payload ran at 00:49 and the Windows Update client scanned at 00:59 - the
+        # guard fires before the event it guards against. One shot cannot hold a state
+        # that a later servicing pass can revert.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match 'function\s+Register-WindowsUpdateGuard'
+        $code | Should -Match '(?m)^\s*Register-WindowsUpdateGuard\s*$'
+        # It has to retire itself: a permanent task in every image is worse than the bug.
+        $code | Should -Match 'Unregister-ScheduledTask'
+    }
+
+    It 'runs the guard before the completion marker check' {
+        # .firstboot-done already exists by the time the first guarded boot happens, so
+        # a guard handled after the marker check would exit 0 and never run.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $guard = [regex]::Match($code, '(?m)^\s*if\s*\(\$WuGuard\)')
+        $marker = [regex]::Match($code, '(?m)Completion marker found')
+        $guard.Success | Should -BeTrue
+        $marker.Success | Should -BeTrue
+        $guard.Index | Should -BeLessThan $marker.Index
+    }
+
+    It 'fails the build when the lockdown did not land in the image' {
+        # Every removal pass is best-effort against a system-owned hive and task tree,
+        # so a build that removed nothing logs identically to one that removed
+        # everything. Read the state back and fail, rather than shipping an ISO whose
+        # removal silently did nothing.
+        $code = Get-ExecutableCode -Source $builderSource['Core']
+        $code | Should -Match 'function\s+Assert-WindowsUpdateLockdown'
+        $code | Should -Match 'Assert-WindowsUpdateLockdown\s+-MountDir'
+        $assert = [regex]::Match($code, '(?m)^\s*Assert-WindowsUpdateLockdown\s+-MountDir')
+        $unload = [regex]::Match($code, '(?m)^\s*Unload-RegistryHives\s*$')
+        $assert.Success | Should -BeTrue
+        $unload.Success | Should -BeTrue
+        # The check is only authoritative while the hives are still loaded.
+        $assert.Index | Should -BeLessThan $unload.Index
+    }
 }
 
 Describe 'Idle memory footprint' {

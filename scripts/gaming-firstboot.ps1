@@ -38,7 +38,11 @@
 [CmdletBinding()]
 param(
     [string]$GamingDir = (Join-Path $env:WINDIR 'Tiny11Gaming'),
-    [switch]$Force
+    [switch]$Force,
+    # Boot-guard mode. Invoked by the WindowsUpdateGuard scheduled task on each boot
+    # until the lockdown has held for $script:GuardBoots boots, then the task removes
+    # itself. Not for interactive use - it deliberately ignores the completion marker.
+    [switch]$WuGuard
 )
 
 $ErrorActionPreference = 'Continue'
@@ -589,6 +593,240 @@ function Invoke-EssentialsFirstBoot {
     Write-Log "Essentials first-boot half complete"
 }
 
+#---------[ Windows Update lockdown re-assert ]---------#
+#
+# The builder sets wuauserv / UsoSvc / WaaSMedicSvc to Start=4 in the mounted
+# image and deletes the Windows Update task folders. That state does not survive
+# contact with a real machine.
+#
+# Observed on a shipped Core-Gaming install: the image booted with wuauserv at
+# Start=3 and InstallService\ScanForUpdates live, while UsoSvc and WaaSMedicSvc
+# stayed at 4. The Windows Update client then scanned from 00:59, found 17 updates
+# and staged them at 02:02 - hours before anything else touched the machine, and
+# before any third-party playbook ran. UsoSvc being off is not a barrier: wuauserv
+# is startable on demand by the client, so a half-disabled stack still updates.
+#
+# That wuauserv specifically was reverted is the tell. The builder writes wuauserv
+# first in the loop, so a failed write would have left all three at their defaults;
+# instead three are at 4 and one is at 3. The write landed and one value was undone
+# afterwards.
+#
+# The mechanism is the first online boot's servicing pass, which re-registers
+# inbox service start types from the component manifests and re-creates the task
+# folders out of the same store. Anything written into the offline hive is only a
+# default that pass is free to overwrite.
+#
+# So the offline pass is not the last word. This runs on the target, after that
+# pass, and re-asserts the identical state. It is idempotent and safe to re-run.
+function Restore-WindowsUpdateLockdown {
+    $services = @('wuauserv', 'UsoSvc', 'WaaSMedicSvc', 'DoSvc')
+
+    # Stop before disabling: setting Start=4 on a running service leaves it running
+    # until the next boot, which is long enough to finish a scan.
+    foreach ($name in $services) {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -ne 'Stopped') {
+            Stop-Service -Name $name -Force -ErrorAction SilentlyContinue
+            # WaitForStatus throws on timeout, and a slow shutdown here must not take
+            # the rest of the payload down with it - the service still gets Start=4
+            # below, and a stopped-at-next-boot service is the same end state.
+            try {
+                (Get-Service -Name $name -ErrorAction Stop).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(15))
+            } catch { }
+            Write-Log "  stopped $name"
+        }
+    }
+
+    foreach ($name in $services) {
+        $key = "HKLM:\SYSTEM\CurrentControlSet\Services\$name"
+        if (-not (Test-Path $key)) {
+            Write-Log "  $name service key absent - nothing to disable" 'WARN'
+            continue
+        }
+        Set-ItemProperty -Path $key -Name 'Start' -Value 4 -Type DWord -ErrorAction SilentlyContinue
+    }
+
+    # Policy layer. Same values the builder writes; repeated here because the
+    # hives are re-read from disk at boot and a third-party playbook can overwrite
+    # them wholesale.
+    $wuPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+    $wuAuPolicy = Join-Path $wuPolicy 'AU'
+    foreach ($pair in @(
+        @{ Path = $wuPolicy;   Name = 'DoNotConnectToWindowsUpdateInternetLocations' },
+        @{ Path = $wuPolicy;   Name = 'DisableWindowsUpdateAccess' },
+        @{ Path = $wuPolicy;   Name = 'SetDisableUXWUAccess' },
+        @{ Path = $wuPolicy;   Name = 'ExcludeWUDriversInQualityUpdate' },
+        @{ Path = $wuAuPolicy; Name = 'NoAutoUpdate' }
+    )) {
+        if (-not (Test-Path $pair.Path)) { New-Item -Path $pair.Path -Force -ErrorAction SilentlyContinue | Out-Null }
+        Set-ItemProperty -Path $pair.Path -Name $pair.Name -Value 1 -Type DWord -ErrorAction SilentlyContinue
+    }
+
+    # Hide the Settings page, but MERGE rather than overwrite.
+    #
+    # The builder writes the literal 'hide:windowsupdate;windowsdefender'. That value
+    # is fragile in both directions: the ReviOS playbook overwrites it wholesale with
+    # its own list (aicomponents, cortana, ...) that does not mention windowsupdate,
+    # so a blind write on either side loses the other's ids. Merging keeps both.
+    #
+    # Note this is cosmetic and is NOT what makes Windows Update work or not work. On
+    # the reference install the page was reported visible again before the playbook
+    # ran, while wuauserv had already been scanning for hours - so treat the page as
+    # a symptom. The service state below is the actual control.
+    $explorerKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+    if (-not (Test-Path $explorerKey)) { New-Item -Path $explorerKey -Force -ErrorAction SilentlyContinue | Out-Null }
+    $wanted = @('windowsupdate', 'windowsdefender')
+    $hide = New-Object System.Collections.Generic.List[string]
+    $show = New-Object System.Collections.Generic.List[string]
+    $current = (Get-ItemProperty -Path $explorerKey -Name 'SettingsPageVisibility' -ErrorAction SilentlyContinue).SettingsPageVisibility
+    if ($current) {
+        # The value is a flat directive list, not a per-item prefix: 'hide:a;b;show:c'
+        # means hide a and b, show c. So the mode carries forward until the next
+        # directive, and a token is never parsed on its own.
+        $mode = 'hide'
+        foreach ($token in ($current -split ';')) {
+            $t = $token.Trim()
+            if (-not $t) { continue }
+            if ($t -match '^hide:(.*)$') { $mode = 'hide'; $id = $matches[1].Trim() }
+            elseif ($t -match '^show:(.*)$') { $mode = 'show'; $id = $matches[1].Trim() }
+            else { $id = $t }
+            if (-not $id) { continue }
+            if ($mode -eq 'show') { $show.Add($id) } else { $hide.Add($id) }
+        }
+    }
+    foreach ($id in $wanted) { if (-not $hide.Contains($id)) { $hide.Add($id) } }
+    $show = @($show | Where-Object { $wanted -notcontains $_ })
+
+    $visibility = 'hide:' + (($hide | Select-Object -Unique) -join ';')
+    if ($show.Count -gt 0) { $visibility += ';show:' + ($show -join ';') }
+    Set-ItemProperty -Path $explorerKey -Name 'SettingsPageVisibility' -Value $visibility -Type String -ErrorAction SilentlyContinue
+    Write-Log "  SettingsPageVisibility = $visibility"
+
+    # Scheduling layer. Unregister through the task service rather than deleting
+    # XML, because the task cache is live at this point.
+    $taskPaths = @(
+        '\Microsoft\Windows\WaaSMedic\',
+        '\Microsoft\Windows\UpdateOrchestrator\',
+        '\Microsoft\Windows\WindowsUpdate\',
+        '\Microsoft\Windows\InstallService\'
+    )
+    $removed = 0
+    foreach ($path in $taskPaths) {
+        foreach ($task in @(Get-ScheduledTask -TaskPath $path -ErrorAction SilentlyContinue)) {
+            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $path -Confirm:$false -ErrorAction SilentlyContinue
+            $removed++
+        }
+    }
+    Write-Log "  unregistered $removed Windows Update task(s)"
+
+    # Verify. A silent no-op here is the whole bug, so report the read-back state
+    # rather than the intent.
+    $bad = @()
+    foreach ($name in $services) {
+        $start = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name 'Start' -ErrorAction SilentlyContinue).Start
+        if ($start -ne 4) { $bad += "$name=$start" }
+    }
+    $pageVisible = (Get-ItemProperty -Path $explorerKey -Name 'SettingsPageVisibility' -ErrorAction SilentlyContinue).SettingsPageVisibility
+    if ($pageVisible -notmatch 'windowsupdate') { $bad += 'SettingsPageVisibility' }
+
+    if ($bad.Count -eq 0) {
+        Write-Log "  verified: all four services disabled, page hidden" 'SUCCESS'
+    } else {
+        Write-Log "  verification failed: $($bad -join ', ')" 'WARN'
+        $script:Failures++
+    }
+}
+
+#---------[ Boot guard ]---------#
+#
+# A single re-assert at SetupComplete is not a guarantee, and the reference install
+# proves it: the payload ran at 00:49, the Windows Update client scanned at 00:59 and
+# online package staging began at 02:02. The one-shot fires before the events it is
+# meant to guard against, and the revert is recurring - any servicing of the Windows
+# Update Agent component can re-register wuauserv, so there is no single moment after
+# which the image is safe.
+#
+# The guard is a SYSTEM startup task that re-asserts on each boot and retires itself
+# once the state has verified clean on $script:GuardBoots separate boots. It is
+# deliberately transient: it exists to survive the first few servicing passes, not to
+# live in the image forever.
+$script:GuardTaskName = 'WindowsUpdateGuard'
+$script:GuardTaskPath = '\Tiny11\'
+$script:GuardBoots = 3
+$script:GuardMaxAttempts = 10
+
+function Register-WindowsUpdateGuard {
+    # Called from the first-boot payload, which runs as SYSTEM under SetupComplete -
+    # the one context where Register-ScheduledTask is both elevated and allowed to
+    # target SYSTEM.
+    $stateFile = Join-Path $GamingDir '.wu-guard-state'
+    Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
+
+    $scriptPath = $PSCommandPath
+    if (-not $scriptPath) { $scriptPath = Join-Path $GamingDir 'gaming-firstboot.ps1' }
+
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+        -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -WuGuard"
+
+    # A boot trigger fires before the boot servicing pass has necessarily finished, so
+    # give it two minutes. The delay also keeps the guard off the critical path of a
+    # user waiting at the desktop.
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $trigger.Delay = 'PT2M'
+
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+
+    Register-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath `
+        -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
+        -Description "Re-asserts the Tiny11 Windows Update lockdown on each boot until it has held for $($script:GuardBoots) boots, then removes itself." `
+        -Force -ErrorAction Stop | Out-Null
+
+    Write-Log "  guard task registered: $($script:GuardTaskPath)$($script:GuardTaskName) (self-removes after $($script:GuardBoots) clean boots)"
+}
+
+function Invoke-WindowsUpdateGuard {
+    # -WuGuard entry point. Runs on every boot until the lockdown is stable.
+    $stateFile = Join-Path $GamingDir '.wu-guard-state'
+    $attempts = 0
+    $clean = 0
+    if (Test-Path -LiteralPath $stateFile) {
+        try {
+            $text = Get-Content -LiteralPath $stateFile -Raw
+            if ($text -match 'attempts\s*=\s*(\d+)') { $attempts = [int]$matches[1] }
+            if ($text -match 'clean\s*=\s*(\d+)') { $clean = [int]$matches[1] }
+        } catch { }
+    }
+    $attempts++
+    Write-Log "Windows Update guard: attempt $attempts, $clean of $($script:GuardBoots) clean boot(s) so far"
+
+    Restore-WindowsUpdateLockdown
+
+    # Only a boot that verified clean counts toward retirement. Counting attempts
+    # would let three broken boots retire the guard while the lockdown is still
+    # failing, which is the exact case it exists for.
+    if ($script:Failures -eq 0) { $clean++ }
+
+    @("attempts=$attempts", "clean=$clean", "lastRun=$(Get-Date -Format 'o')") -join "`r`n" |
+        Out-File -FilePath $stateFile -Encoding UTF8 -Force
+
+    $retire = ($clean -ge $script:GuardBoots)
+    if (-not $retire -and $attempts -ge $script:GuardMaxAttempts) {
+        # Never leave a permanent task behind. If ten boots did not produce three
+        # clean verifications, something else owns the state and a silent task in
+        # the image is worse than an honest warning.
+        Write-Log "guard giving up after $attempts attempt(s) with $clean clean boot(s) - retiring the task, the lockdown is not holding" 'WARN'
+        $retire = $true
+    }
+
+    if ($retire) {
+        Unregister-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath -Confirm:$false -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
+        Write-Log "guard retired after $clean clean boot(s)" 'SUCCESS'
+    }
+}
+
 #---------[ Main ]---------#
 
 Write-Log "=============================================="
@@ -598,6 +836,15 @@ Write-Log "=============================================="
 if (-not (Test-IsElevated)) {
     Write-Log "Not running elevated - aborting. Run this from an Administrator prompt." 'ERROR'
     exit 1
+}
+
+# Guard mode is handled before the completion marker check on purpose: by the time the
+# first guarded boot happens, .firstboot-done already exists and the marker check would
+# exit 0 without doing anything.
+if ($WuGuard) {
+    Invoke-WindowsUpdateGuard
+    if ($script:Failures -gt 0) { exit 1 }
+    exit 0
 }
 
 if ((Test-Path -LiteralPath $script:Marker) -and -not $Force) {
@@ -636,6 +883,20 @@ try {
     # reset the active scheme, so anything that touches power must come before it.
     Write-Section 'Essentials pass'
     Invoke-EssentialsFirstBoot -ConfigPath $essentialsConfig
+
+    # Runs after the essentials pass and before anything else: this is the first
+    # payload that executes after the boot-time servicing pass that re-enables the
+    # Windows Update stack, so it is the only place the lockdown can be re-asserted
+    # before a scan gets a chance to run.
+    Write-Section 'Windows Update lockdown'
+    Restore-WindowsUpdateLockdown
+    try {
+        Register-WindowsUpdateGuard
+    } catch {
+        # Not fatal: the lockdown above is already applied. A missing guard means the
+        # state is only as good as this boot, which is worth a warning, not an abort.
+        Write-Log "could not register the Windows Update guard task ($_)" 'WARN'
+    }
 
     if (Test-GroupEnabled 'atlas_power_scheme') {
         Write-Section 'Power scheme'

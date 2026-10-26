@@ -152,15 +152,79 @@ why a Core image can still show *"Updates are underway, do not turn off your PC"
   Windows Update and **put it back**.
 - `UsoSvc` (Update Orchestrator) runs the servicing pass at boot.
 
-Core-Gaming deletes all three service keys, removes the Update Orchestrator scheduled tasks,
-sets `NoAutoUpdate`, and hides the Windows Update and Windows Security pages in Settings via
-the `SettingsPageVisibility` policy (`hide:windowsupdate;windowsdefender`).
+Core-Gaming **disables** all three services (`Start=4`, the keys stay), removes the Update
+Orchestrator / InstallService / WindowsUpdate / WaaSMedic scheduled tasks, sets `NoAutoUpdate`,
+and hides the Windows Update and Windows Security pages in Settings via the
+`SettingsPageVisibility` policy (`hide:windowsupdate;windowsdefender`).
+
+The keys are disabled rather than deleted on purpose. Deleting them does not survive: the
+servicing stack restores missing inbox service registrations on the first online boot, and the
+delete/restore cycle is itself the pending servicing operation that produces the back-to-back
+double restart. `Start=4` on a key that still exists is what holds.
+
+> **The offline pass is not the last word.** Everything above is written into the mounted image,
+> and the first online boot runs a servicing pass that re-registers inbox service start types
+> from the component manifests. A shipped Core-Gaming image has been observed booting with
+> `wuauserv` back at `Start=3` and `InstallService\ScanForUpdates` live, while `UsoSvc` and
+> `WaaSMedicSvc` stayed at `4` — a half-disabled stack that still scans, because `wuauserv` is
+> startable on demand by the client. `UsoSvc` being off is not a barrier.
+>
+> That is why `gaming-firstboot.ps1` re-asserts the same state on the target, immediately after
+> the essentials pass and before anything slow runs. If you are reading a first-boot log and the
+> `Windows Update lockdown` section is missing, you are on an image from before that fix.
+
+**A single re-assert is still not enough**, and the reference install shows why. That payload is
+wired through `SetupComplete.cmd`, which runs once, before the first logon — at 00:49 on that
+machine, while the Windows Update client scanned at 00:59 and online package staging began at
+02:02. The one-shot fires *before* the events it guards against, and the revert is recurring: any
+servicing of the Windows Update Agent component can re-register `wuauserv`, so there is no single
+moment after which the image is safe.
+
+So the lockdown is enforced in two places:
+
+1. **A transient boot guard.** The first-boot payload registers `\Tiny11\WindowsUpdateGuard`, a
+   SYSTEM startup task (2-minute delay) that runs `gaming-firstboot.ps1 -WuGuard`. It re-asserts
+   and re-verifies on each boot, and **removes itself once the state has verified clean on three
+   separate boots** — or after ten attempts, with a warning, so it can never become permanent
+   cruft. Only a clean verification counts toward retirement; counting attempts would let three
+   broken boots retire the guard while the lockdown is failing, which is the case it exists for.
+2. **A build-time gate.** `Assert-WindowsUpdateLockdown` reads the state back out of the mounted
+   image after every service and task pass, while the hives are still loaded. If `wuauserv`,
+   `UsoSvc` or `WaaSMedicSvc` is not `Start=4`, or any of the four task folders survives, the
+   build **fails**. This exists because the removal passes are best-effort against a system-owned
+   hive and task tree — `Remove-Item -ErrorAction SilentlyContinue` makes "denied" and "deleted"
+   log identically. A build that cannot remove them needs the ownership problem fixed, not a
+   warning that scrolls past in CI.
+
+> **What is still not a guarantee.** If Windows re-registers `wuauserv` *after* the guard has
+> retired — a later feature update, a manually applied LCU — nothing re-checks. The guard covers
+> the install window, which is where this actually broke; it is not a permanent watchdog. And
+> updating the ISO to the latest LCU does not change any of this: `Invoke-ImageUpdate` runs
+> offline before the debloat, so the ordering is right, but the revert happens online at boot,
+> long after the ISO is sealed.
 
 > **What hiding the Settings pages does and does not do.** `SettingsPageVisibility` is a
-> *navigation-level* hide — it removes the pages from the Settings list. It is not a removal,
-> so a leftover tile, an `ms-settings:windowsupdate` link or a notification can still open the
-> page. When that happens the page will fail to render, because the Update Orchestrator and
-> Medic services backing it have been deleted. An error there is expected, not a build fault.
+> *navigation-level* hide — it removes the pages from the Settings list. It is not a removal, so
+> a leftover tile, an `ms-settings:windowsupdate` link or a notification can still open the page.
+> The page will then show the managed state, because the access policies are in place.
+>
+> It is also the first thing a debloat playbook rewrites. The ReviOS playbook replaces it with
+> its own list (`aicomponents`, `cortana`, …) that does not mention `windowsupdate` — a blind
+> overwrite in either direction loses the other side's ids. The first-boot pass therefore
+> **merges** its page ids into whatever value it finds instead of overwriting it.
+>
+> Do not read too much into this page. On the reference install the page was reported visible
+> again *before* the playbook ran, while `wuauserv` had already been scanning for hours. Treat a
+> visible page as a symptom; the service state is the actual control, and it is the only thing
+> worth verifying.
+
+> **Do not stack a third-party playbook on top of this image.** AME Wizard / ReviOS / Atlas
+> playbooks install their own removal CABs with `Add-WindowsPackage`. On a Core-Gaming image that
+> fails with `0x80073712 ERROR_SXS_COMPONENT_STORE_CORRUPT` and then `0x8007007e` at the reboot,
+> because the build has already run `StartComponentCleanup /ResetBase` — the component store is
+> not serviceable by design. The pending transactions that fail are what force the extra
+> restarts and the "Windows Module Installer" CPU spike. The playbook half-applies and leaves
+> the image in a mixed state.
 
 `wuaueng.dll` and `wuapi.dll` are deliberately **left in place** — other inbox components
 link them, and a missing DLL fails hard rather than degrading. With the services gone,
