@@ -160,7 +160,17 @@ and hides the Windows Update and Windows Security pages in Settings via the
 The keys are disabled rather than deleted on purpose. Deleting them does not survive: the
 servicing stack restores missing inbox service registrations on the first online boot, and the
 delete/restore cycle is itself the pending servicing operation that produces the back-to-back
-double restart. `Start=4` on a key that still exists is what holds.
+double restart. `Start=4` on a key that still exists survives the boot — **but only if the
+service control manager is told about it.**
+
+The SCM caches each service's start type in memory and does not watch the registry. A value
+written with `Set-ItemProperty` is visible to `reg query`, to `Get-Service` and to `sc qc`, and
+still leaves the service startable for the rest of the session. On a 26H1 guest a stopped
+`wuauserv` with `Start=0x4` reached RUNNING from `Start-Service`; it returned `1058` only after
+an `sc config`. Anything that disables a service on a *running* system has to go through
+`ChangeServiceConfig` — `Set-Service -StartupType Disabled` or `sc.exe config <svc> start=
+disabled`. Writing the hive directly is only correct offline, where no SCM is running to cache
+the old value.
 
 > **The offline pass is not the last word.** Everything above is written into the mounted image,
 > and the first online boot runs a servicing pass that re-registers inbox service start types
@@ -170,8 +180,15 @@ double restart. `Start=4` on a key that still exists is what holds.
 > startable on demand by the client. `UsoSvc` being off is not a barrier.
 >
 > That is why `gaming-firstboot.ps1` re-asserts the same state on the target, immediately after
-> the essentials pass and before anything slow runs. If you are reading a first-boot log and the
-> `Windows Update lockdown` section is missing, you are on an image from before that fix.
+> the essentials pass and before anything slow runs. It disables through `Set-Service`, not
+> through the hive, and it verifies by behaviour: every service must be `Stopped` **and** must
+> refuse a `Start-Service` with `1058`. A registry read is not accepted as evidence — it was `4`
+> for the entire time `wuauserv` was running on that guest. If you are reading a first-boot log
+> and the `Windows Update lockdown` section is missing, you are on an image from before that fix.
+>
+> `DoSvc` (Delivery Optimization) is only disabled when the `strip_background_noise` group is
+> enabled, because the builder leaves that service to the same group. Disabling it
+> unconditionally would override a toggle the user turned off.
 
 **A single re-assert is still not enough**, and the reference install shows why. That payload is
 wired through `SetupComplete.cmd`, which runs once, before the first logon — at 00:49 on that

@@ -272,6 +272,65 @@ Describe 'Windows Update stays gone' {
         # The check is only authoritative while the hives are still loaded.
         $assert.Index | Should -BeLessThan $unload.Index
     }
+
+    It 'disables the services through the SCM, not through the hive' {
+        # Set-ItemProperty on HKLM\SYSTEM\...\Services\<svc>\Start updates the registry
+        # and nothing else. The SCM caches each service's start type in memory and does
+        # not watch the hive, so the service stays startable for the rest of the session
+        # even though reg query, Get-Service and sc qc all report Disabled.
+        #
+        # Measured on a 26H1 Core-Gaming guest: a stopped wuauserv with Start=0x4 reached
+        # RUNNING from Start-Service. `sc config wuauserv start= disabled` (the same
+        # ChangeServiceConfig call Set-Service makes) then made it return 1058. The
+        # registry write is only correct offline, where no SCM is running to cache it.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match 'function\s+Disable-ServiceThroughScm'
+        $code | Should -Match 'Set-Service\s+-Name\s+\$Name\s+-StartupType\s+Disabled'
+        # No direct Start write anywhere in the payload - that is the shape of the bug.
+        $code | Should -Not -Match "-Name\s+'Start'"
+    }
+
+    It 'proves a disabled service cannot be started instead of reading the value' {
+        # A registry read reported "disabled" for the entire window in which wuauserv was
+        # running. The only evidence that holds is a start attempt that is refused with
+        # 1058, so the verifier has to attempt one and treat a successful start as the
+        # failure case.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match 'function\s+Test-ServiceStartBlocked'
+        $code | Should -Match 'Start-Service\s+-Name\s+\$Name'
+        $code | Should -Match '1058'
+    }
+
+    It 'waits long enough for wuauserv to actually stop' {
+        # wuauserv measured 10-45 s to reach STOPPED. The old 15 s wait expired while it
+        # was still STOP_PENDING, and the log printed "stopped wuauserv" regardless.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $m = [regex]::Match($code, 'WaitForStatus\([^)]*FromSeconds\((\d+)\)')
+        $m.Success | Should -BeTrue
+        [int]$m.Groups[1].Value | Should -BeGreaterOrEqual 30
+        # And the outcome is re-read, not assumed.
+        $code | Should -Match '\$svc\.Refresh\(\)'
+        $code | Should -Match 'did not stop'
+    }
+
+    It 'only disables DoSvc when strip_background_noise is enabled' {
+        # The builder leaves DoSvc to that group on purpose (see the comment at the
+        # service list in tiny11coremaker-headless.ps1). Disabling it unconditionally in
+        # the first-boot payload silently overrides a toggle the user turned off.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match "Test-GamingGroupEnabled\s+'strip_background_noise'"
+        $code | Should -Match "\`$services\s*\+=\s*'DoSvc'"
+    }
+
+    It 'counts only the update tasks that actually disappeared' {
+        # Unregister-ScheduledTask with -ErrorAction SilentlyContinue returns the same
+        # nothing whether it succeeded or was denied, so the old $removed++ counted
+        # attempts. InstallService\ScanForUpdates was live on a shipped image while the
+        # log claimed the tasks were gone.
+        $code = Get-ExecutableCode -Source $firstBootSource
+        $code | Should -Match 'Get-ScheduledTask\s+-TaskName\s+\$task\.TaskName\s+-TaskPath\s+\$path'
+        $code | Should -Match 'could not unregister'
+    }
 }
 
 Describe 'Idle memory footprint' {

@@ -618,32 +618,107 @@ function Invoke-EssentialsFirstBoot {
 #
 # So the offline pass is not the last word. This runs on the target, after that
 # pass, and re-asserts the identical state. It is idempotent and safe to re-run.
-function Restore-WindowsUpdateLockdown {
-    $services = @('wuauserv', 'UsoSvc', 'WaaSMedicSvc', 'DoSvc')
+function Test-GamingGroupEnabled {
+    param([string]$Name)
 
-    # Stop before disabling: setting Start=4 on a running service leaves it running
-    # until the next boot, which is long enough to finish a scan.
+    # Guard mode runs before the main flow loads $groups, so resolve the flag from the
+    # staged JSON instead of depending on script state that does not exist yet.
+    $existing = Get-Variable -Name groups -Scope Script -ErrorAction SilentlyContinue
+    if ($existing -and $existing.Value -and $existing.Value.ContainsKey($Name)) {
+        return [bool]$existing.Value[$Name]
+    }
+    $file = Join-Path $GamingDir 'gaming_groups.json'
+    if (Test-Path -LiteralPath $file) {
+        try {
+            $flags = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+            if ($flags.PSObject.Properties.Name -contains $Name) { return [bool]$flags.$Name }
+        } catch { }
+    }
+    return $true
+}
+
+function Disable-ServiceThroughScm {
+    param([string]$Name)
+
+    # A service the image does not carry cannot serve the update client, and Set-Service
+    # throws rather than no-ops on a missing name.
+    if (-not (Get-Service -Name $Name -ErrorAction SilentlyContinue)) {
+        Write-Log "  $Name not present - nothing to disable"
+        return $true
+    }
+
+    # Set-Service is ChangeServiceConfig: it writes the hive AND notifies the running
+    # SCM. Set-ItemProperty on the same value only does the first half, and that gap is
+    # not theoretical. On a 26H1 guest a stopped wuauserv with Start=0x4 still reached
+    # RUNNING from Start-Service, and returned 1058 only after an `sc config`. The SCM
+    # keeps the start type it read at boot until something tells it otherwise, so the
+    # registry write alone left the service startable for the rest of the session.
+    try {
+        Set-Service -Name $Name -StartupType Disabled -ErrorAction Stop
+        return $true
+    } catch {
+        # A few inbox services cannot be re-read by Set-Service. sc.exe config is the
+        # same ChangeServiceConfig call through a different door.
+        & sc.exe config $Name start= disabled 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { return $true }
+        Write-Log "  could not disable $Name through the SCM: $($_.Exception.Message)" 'WARN'
+        return $false
+    }
+}
+
+function Test-ServiceStartBlocked {
+    param([string]$Name)
+
+    # The only proof that a disabled service cannot be started is to try it. Reading the
+    # Start value - or even `sc qc`, which also said DISABLED - answers a different
+    # question: on 26H1 both reported disabled while Start-Service brought the service up.
+    #
+    # Only called after a successful ChangeServiceConfig, so the SCM has already been
+    # told. If the probe starts the service anyway the lockdown is broken, so put it back
+    # immediately and let the caller report the failure.
+    try {
+        Start-Service -Name $Name -ErrorAction Stop
+    } catch {
+        $native = $null
+        if ($_.Exception.InnerException) { $native = $_.Exception.InnerException.NativeErrorCode }
+        if ($native -eq 1058) { return $true }
+        if ("$($_.Exception.Message)" -match 'disabled|1058') { return $true }
+        return $false
+    }
+
+    Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+    return $false
+}
+
+function Restore-WindowsUpdateLockdown {
+    # DoSvc is owned by the profile's strip_background_noise group, and the builder leaves
+    # it alone for exactly that reason (see tiny11coremaker-headless.ps1). Disabling it
+    # here unconditionally would quietly override a toggle the user turned off.
+    $services = @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')
+    if (Test-GamingGroupEnabled 'strip_background_noise') { $services += 'DoSvc' }
+
+    # Stop before disabling: a service that is still running serves the WU client even
+    # with Start=4 written, and a scan started now finishes regardless of the flag.
     foreach ($name in $services) {
         $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
-        if ($svc -and $svc.Status -ne 'Stopped') {
-            Stop-Service -Name $name -Force -ErrorAction SilentlyContinue
-            # WaitForStatus throws on timeout, and a slow shutdown here must not take
-            # the rest of the payload down with it - the service still gets Start=4
-            # below, and a stopped-at-next-boot service is the same end state.
-            try {
-                (Get-Service -Name $name -ErrorAction Stop).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(15))
-            } catch { }
+        if (-not $svc -or $svc.Status -eq 'Stopped') { continue }
+
+        Stop-Service -Name $name -Force -ErrorAction SilentlyContinue
+        # wuauserv measured 10-45 s to reach STOPPED on a 26H1 guest, so allow 60. The
+        # previous 15 s wait expired while it was still STOP_PENDING, logged "stopped"
+        # anyway, and left a running service behind a verification that reported success.
+        try { $svc.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(60)) } catch { }
+        $svc.Refresh()
+        if ($svc.Status -eq 'Stopped') {
             Write-Log "  stopped $name"
+        } else {
+            Write-Log "  $name did not stop (status $($svc.Status))" 'WARN'
+            $script:Failures++
         }
     }
 
     foreach ($name in $services) {
-        $key = "HKLM:\SYSTEM\CurrentControlSet\Services\$name"
-        if (-not (Test-Path $key)) {
-            Write-Log "  $name service key absent - nothing to disable" 'WARN'
-            continue
-        }
-        Set-ItemProperty -Path $key -Name 'Start' -Value 4 -Type DWord -ErrorAction SilentlyContinue
+        if (-not (Disable-ServiceThroughScm -Name $name)) { $script:Failures++ }
     }
 
     # Policy layer. Same values the builder writes; repeated here because the
@@ -702,8 +777,11 @@ function Restore-WindowsUpdateLockdown {
     Set-ItemProperty -Path $explorerKey -Name 'SettingsPageVisibility' -Value $visibility -Type String -ErrorAction SilentlyContinue
     Write-Log "  SettingsPageVisibility = $visibility"
 
-    # Scheduling layer. Unregister through the task service rather than deleting
-    # XML, because the task cache is live at this point.
+    # Scheduling layer. Unregister through the task service rather than deleting XML,
+    # because the task cache is live at this point. Count only what actually went away:
+    # Unregister-ScheduledTask with -ErrorAction SilentlyContinue returns the same nothing
+    # whether it succeeded or was denied, which is how the original bug shipped with
+    # InstallService\ScanForUpdates still registered and no line in the log to say so.
     $taskPaths = @(
         '\Microsoft\Windows\WaaSMedic\',
         '\Microsoft\Windows\UpdateOrchestrator\',
@@ -711,26 +789,39 @@ function Restore-WindowsUpdateLockdown {
         '\Microsoft\Windows\InstallService\'
     )
     $removed = 0
+    $stubborn = @()
     foreach ($path in $taskPaths) {
         foreach ($task in @(Get-ScheduledTask -TaskPath $path -ErrorAction SilentlyContinue)) {
             Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $path -Confirm:$false -ErrorAction SilentlyContinue
-            $removed++
+            if (@(Get-ScheduledTask -TaskName $task.TaskName -TaskPath $path -ErrorAction SilentlyContinue).Count -eq 0) {
+                $removed++
+            } else {
+                $stubborn += "$path$($task.TaskName)"
+            }
         }
+    }
+    if ($stubborn.Count -gt 0) {
+        Write-Log "  could not unregister: $($stubborn -join ', ')" 'WARN'
+        $script:Failures++
     }
     Write-Log "  unregistered $removed Windows Update task(s)"
 
-    # Verify. A silent no-op here is the whole bug, so report the read-back state
-    # rather than the intent.
+    # Verify by behaviour, not by intent. A registry read said "disabled" throughout the
+    # failure this guard exists for, so the state is only trusted after a start attempt
+    # has been refused.
     $bad = @()
     foreach ($name in $services) {
-        $start = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name 'Start' -ErrorAction SilentlyContinue).Start
-        if ($start -ne 4) { $bad += "$name=$start" }
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if (-not $svc) { continue }
+        $svc.Refresh()
+        if ($svc.Status -ne 'Stopped') { $bad += "$name $($svc.Status)"; continue }
+        if (-not (Test-ServiceStartBlocked -Name $name)) { $bad += "$name still startable" }
     }
     $pageVisible = (Get-ItemProperty -Path $explorerKey -Name 'SettingsPageVisibility' -ErrorAction SilentlyContinue).SettingsPageVisibility
     if ($pageVisible -notmatch 'windowsupdate') { $bad += 'SettingsPageVisibility' }
 
     if ($bad.Count -eq 0) {
-        Write-Log "  verified: all four services disabled, page hidden" 'SUCCESS'
+        Write-Log "  verified: $($services.Count) service(s) stopped, disabled and refusing to start; page hidden" 'SUCCESS'
     } else {
         Write-Log "  verification failed: $($bad -join ', ')" 'WARN'
         $script:Failures++
@@ -775,8 +866,10 @@ function Register-WindowsUpdateGuard {
     $trigger.Delay = 'PT2M'
 
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    # 10 minutes, not 5: wuauserv alone can take 45 s to stop, and the verification now
+    # attempts a start per service instead of reading a registry value.
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+        -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
 
     Register-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath `
         -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
