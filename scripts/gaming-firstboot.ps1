@@ -840,14 +840,21 @@ function Restore-WindowsUpdateLockdown {
 # Update Agent component can re-register wuauserv, so there is no single moment after
 # which the image is safe.
 #
-# The guard is a SYSTEM startup task that re-asserts on each boot and retires itself
-# once the state has verified clean on $script:GuardBoots separate boots. It is
-# deliberately transient: it exists to survive the first few servicing passes, not to
-# live in the image forever.
+# The guard is a SYSTEM startup task that re-asserts the lockdown on every boot, and
+# repeats during the first 20 minutes of the boot because that is when the servicing
+# pass runs. It is permanent.
+#
+# It used to unregister itself after three clean boots. That was wrong on the evidence:
+# on a fresh install of the fixed image the boot servicing pass re-registers wuauserv to
+# Manual and starts it again on boot 2, roughly three minutes in. Nothing suggests boot
+# 3 is the last time that happens, and a later LCU or feature update can do it again at
+# any point in the machine's life. A guard that stops watching is a guard that fails
+# silently, which is the failure mode this whole change exists to remove. The measured
+# cost of keeping it is about a second per run when the state is already correct.
 $script:GuardTaskName = 'WindowsUpdateGuard'
 $script:GuardTaskPath = '\Tiny11\'
-$script:GuardBoots = 3
-$script:GuardMaxAttempts = 10
+$script:GuardIntervalMinutes = 2
+$script:GuardDurationMinutes = 20
 
 function Register-WindowsUpdateGuard {
     # Called from the first-boot payload, which runs as SYSTEM under SetupComplete -
@@ -863,10 +870,19 @@ function Register-WindowsUpdateGuard {
         -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -WuGuard"
 
     # A boot trigger fires before the boot servicing pass has necessarily finished, so
-    # give it two minutes. The delay also keeps the guard off the critical path of a
-    # user waiting at the desktop.
+    # the first run waits two minutes. That delay also keeps the guard off the critical
+    # path of a user waiting at the desktop.
     $trigger = New-ScheduledTaskTrigger -AtStartup
     $trigger.Delay = 'PT2M'
+
+    # Repetition has to be grafted on: New-ScheduledTaskTrigger has no
+    # -RepetitionInterval for a boot trigger, but the underlying MSFT_TaskBootTrigger
+    # does support it. Without this the guard only runs once per boot, and the servicing
+    # pass can re-enable wuauserv after that run and keep it for the rest of the session.
+    $repeater = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+        -RepetitionInterval (New-TimeSpan -Minutes $script:GuardIntervalMinutes) `
+        -RepetitionDuration (New-TimeSpan -Minutes $script:GuardDurationMinutes)
+    $trigger.Repetition = $repeater.Repetition
 
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     # 10 minutes, not 5: wuauserv alone can take 45 s to stop, and the verification now
@@ -876,51 +892,37 @@ function Register-WindowsUpdateGuard {
 
     Register-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath `
         -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
-        -Description "Re-asserts the Tiny11 Windows Update lockdown on each boot until it has held for $($script:GuardBoots) boots, then removes itself." `
+        -Description "Re-asserts the Tiny11 Windows Update lockdown on every boot, every $($script:GuardIntervalMinutes) minutes for the first $($script:GuardDurationMinutes)." `
         -Force -ErrorAction Stop | Out-Null
 
-    Write-Log "  guard task registered: $($script:GuardTaskPath)$($script:GuardTaskName) (self-removes after $($script:GuardBoots) clean boots)"
+    Write-Log "  guard task registered: $($script:GuardTaskPath)$($script:GuardTaskName) (permanent, every $($script:GuardIntervalMinutes) min for $($script:GuardDurationMinutes) min per boot)"
 }
 
 function Invoke-WindowsUpdateGuard {
-    # -WuGuard entry point. Runs on every boot until the lockdown is stable.
+    # -WuGuard entry point. Runs on every boot, then on the repetition interval.
     $stateFile = Join-Path $GamingDir '.wu-guard-state'
-    $attempts = 0
-    $clean = 0
+    $runs = 0
     if (Test-Path -LiteralPath $stateFile) {
         try {
             $text = Get-Content -LiteralPath $stateFile -Raw
-            if ($text -match 'attempts\s*=\s*(\d+)') { $attempts = [int]$matches[1] }
-            if ($text -match 'clean\s*=\s*(\d+)') { $clean = [int]$matches[1] }
+            if ($text -match 'runs\s*=\s*(\d+)') { $runs = [int]$matches[1] }
         } catch { }
     }
-    $attempts++
-    Write-Log "Windows Update guard: attempt $attempts, $clean of $($script:GuardBoots) clean boot(s) so far"
+    $runs++
+
+    # Logged before the work, so a run that hangs is still visible as the last line.
+    Write-Log "Windows Update guard: run $runs"
 
     Restore-WindowsUpdateLockdown
 
-    # Only a boot that verified clean counts toward retirement. Counting attempts
-    # would let three broken boots retire the guard while the lockdown is still
-    # failing, which is the exact case it exists for.
-    if ($script:Failures -eq 0) { $clean++ }
+    $result = if ($script:Failures -eq 0) { 'clean' } else { "failed($($script:Failures))" }
 
-    @("attempts=$attempts", "clean=$clean", "lastRun=$(Get-Date -Format 'o')") -join "`r`n" |
-        Out-File -FilePath $stateFile -Encoding UTF8 -Force
-
-    $retire = ($clean -ge $script:GuardBoots)
-    if (-not $retire -and $attempts -ge $script:GuardMaxAttempts) {
-        # Never leave a permanent task behind. If ten boots did not produce three
-        # clean verifications, something else owns the state and a silent task in
-        # the image is worse than an honest warning.
-        Write-Log "guard giving up after $attempts attempt(s) with $clean clean boot(s) - retiring the task, the lockdown is not holding" 'WARN'
-        $retire = $true
-    }
-
-    if ($retire) {
-        Unregister-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath -Confirm:$false -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $stateFile -Force -ErrorAction SilentlyContinue
-        Write-Log "guard retired after $clean clean boot(s)" 'SUCCESS'
-    }
+    # Diagnostics only - nothing retires on this any more.
+    @(
+        "runs=$runs",
+        "lastRun=$(Get-Date -Format 'o')",
+        "lastResult=$result"
+    ) -join "`r`n" | Out-File -FilePath $stateFile -Encoding UTF8 -Force
 }
 
 #---------[ Main ]---------#

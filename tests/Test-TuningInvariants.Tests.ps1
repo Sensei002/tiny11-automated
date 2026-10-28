@@ -234,16 +234,26 @@ Describe 'Windows Update stays gone' {
         $code | Should -Not -Match "SettingsPageVisibility'\s+-Value\s+'hide:"
     }
 
-    It 'registers a transient boot guard instead of trusting one re-assert' {
+    It 'registers a permanent boot guard that repeats through the boot phase' {
         # SetupComplete runs once, before the first logon. On the reference install the
         # payload ran at 00:49 and the Windows Update client scanned at 00:59 - the
         # guard fires before the event it guards against. One shot cannot hold a state
         # that a later servicing pass can revert.
+        #
+        # It used to unregister itself after three clean boots. A fresh install of the
+        # fixed image disproved the assumption behind that: the boot servicing pass put
+        # wuauserv back to Manual on boot 2, before the guard's first run. A guard that
+        # stops watching fails silently, so it is permanent now.
         $code = Get-ExecutableCode -Source $firstBootSource
         $code | Should -Match 'function\s+Register-WindowsUpdateGuard'
         $code | Should -Match '(?m)^\s*Register-WindowsUpdateGuard\s*$'
-        # It has to retire itself: a permanent task in every image is worse than the bug.
-        $code | Should -Match 'Unregister-ScheduledTask'
+        # Repetition is what closes the window between servicing re-enabling the service
+        # and the guard noticing it.
+        $code | Should -Match '\$trigger\.Repetition'
+        $code | Should -Match 'RepetitionInterval'
+        # No retirement counter may come back.
+        $code | Should -Not -Match 'GuardBoots'
+        $code | Should -Not -Match 'GuardMaxAttempts'
     }
 
     It 'runs the guard before the completion marker check' {

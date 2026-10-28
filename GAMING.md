@@ -199,12 +199,10 @@ moment after which the image is safe.
 
 So the lockdown is enforced in two places:
 
-1. **A transient boot guard.** The first-boot payload registers `\Tiny11\WindowsUpdateGuard`, a
-   SYSTEM startup task (2-minute delay) that runs `gaming-firstboot.ps1 -WuGuard`. It re-asserts
-   and re-verifies on each boot, and **removes itself once the state has verified clean on three
-   separate boots** — or after ten attempts, with a warning, so it can never become permanent
-   cruft. Only a clean verification counts toward retirement; counting attempts would let three
-   broken boots retire the guard while the lockdown is failing, which is the case it exists for.
+1. **A permanent boot guard.** The first-boot payload registers `\Tiny11\WindowsUpdateGuard`, a
+   SYSTEM startup task that runs `gaming-firstboot.ps1 -WuGuard` two minutes after boot and then
+   every two minutes for the first twenty minutes of that boot. It re-asserts and re-verifies,
+   and it never removes itself.
 2. **A build-time gate.** `Assert-WindowsUpdateLockdown` reads the state back out of the mounted
    image after every service and task pass, while the hives are still loaded. If `wuauserv`,
    `UsoSvc` or `WaaSMedicSvc` is not `Start=4`, or any of the four task folders survives, the
@@ -213,12 +211,27 @@ So the lockdown is enforced in two places:
    log identically. A build that cannot remove them needs the ownership problem fixed, not a
    warning that scrolls past in CI.
 
-> **What is still not a guarantee.** If Windows re-registers `wuauserv` *after* the guard has
-> retired — a later feature update, a manually applied LCU — nothing re-checks. The guard covers
-> the install window, which is where this actually broke; it is not a permanent watchdog. And
-> updating the ISO to the latest LCU does not change any of this: `Invoke-ImageUpdate` runs
-> offline before the debloat, so the ordering is right, but the revert happens online at boot,
-> long after the ISO is sealed.
+> **Why the guard is permanent, and why it repeats.** It used to unregister itself after three
+> clean boots. A fresh install of the fixed image disproved the assumption behind that: the boot
+> servicing pass re-registered `wuauserv` to `Manual` and started it again **on boot 2**, about
+> three minutes in, before the guard's first run. Nothing suggests boot 3 is the last time that
+> happens, and a later LCU or feature update can do it again at any point. A guard that stops
+> watching fails silently, which is the failure mode this whole mechanism exists to remove.
+>
+> The repetition covers the window the delay opens. With a single run per boot there is a gap
+> between "servicing re-enables the service" and "the guard notices" — measured at roughly three
+> minutes on a fast VM, longer on the hardware this image targets. Repeating every two minutes
+> keeps that gap under one interval and catches re-enables that happen later in the boot.
+>
+> Measured cost: about a second per run when the state is already correct, six seconds when it
+> has to stop a service. Runs are logged to `C:\Windows\Tiny11Gaming\gaming-firstboot.log`.
+
+> **What is still not a guarantee.** Nothing stops Windows from re-registering `wuauserv` *during*
+> the guard's interval, and nothing blocks the update endpoints at the network layer. If a scan
+> starts inside that window it can complete. The guard converges the state; it does not make the
+> machine unreachable to Microsoft. And updating the ISO to the latest LCU does not change any of
+> this: `Invoke-ImageUpdate` runs offline before the debloat, so the ordering is right, but the
+> revert happens online at boot, long after the ISO is sealed.
 
 > **What hiding the Settings pages does and does not do.** `SettingsPageVisibility` is a
 > *navigation-level* hide — it removes the pages from the Settings list. It is not a removal, so
