@@ -182,7 +182,7 @@ the old value.
 > That is why `gaming-firstboot.ps1` re-asserts the same state on the target, immediately after
 > the essentials pass and before anything slow runs. It disables through `Set-Service`, not
 > through the hive, and it verifies by behaviour: every service must be `Stopped` **and** must
-> refuse a `Start-Service` with `1058`. A registry read is not accepted as evidence — it was `4`
+> refuse a start attempt with `1058`. A registry read is not accepted as evidence — it was `4`
 > for the entire time `wuauserv` was running on that guest. If you are reading a first-boot log
 > and the `Windows Update lockdown` section is missing, you are on an image from before that fix.
 >

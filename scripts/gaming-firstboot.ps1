@@ -669,24 +669,27 @@ function Disable-ServiceThroughScm {
 function Test-ServiceStartBlocked {
     param([string]$Name)
 
-    # The only proof that a disabled service cannot be started is to try it. Reading the
-    # Start value - or even `sc qc`, which also said DISABLED - answers a different
-    # question: on 26H1 both reported disabled while Start-Service brought the service up.
+    # sc.exe rather than Start-Service, on purpose. PowerShell wraps the refusal in a
+    # ServiceCommandException whose message is only "Cannot start service X on computer
+    # '.'." - it carries neither the Win32 code nor the word "disabled", so matching on
+    # the exception reported every service as startable on a build where the lockdown was
+    # in fact holding. sc.exe exits with the SCM's own code, which is language neutral:
+    # 1058 means disabled.
     #
-    # Only called after a successful ChangeServiceConfig, so the SCM has already been
-    # told. If the probe starts the service anyway the lockdown is broken, so put it back
-    # immediately and let the caller report the failure.
-    try {
-        Start-Service -Name $Name -ErrorAction Stop
-    } catch {
-        $native = $null
-        if ($_.Exception.InnerException) { $native = $_.Exception.InnerException.NativeErrorCode }
-        if ($native -eq 1058) { return $true }
-        if ("$($_.Exception.Message)" -match 'disabled|1058') { return $true }
-        return $false
+    # The probe is still the only real proof. Reading the Start value - or even `sc qc`,
+    # which also said DISABLED - answers a different question: on 26H1 both reported
+    # disabled while the service was startable.
+    & sc.exe start $Name 2>&1 | Out-Null
+    $code = $LASTEXITCODE
+
+    if ($code -eq 1058) { return $true }
+
+    if ($code -eq 0) {
+        # It started, so the lockdown is not holding. Put it back before returning.
+        Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
     }
 
-    Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+    # Anything else is not proof of a disabled service, so report it rather than pass.
     return $false
 }
 

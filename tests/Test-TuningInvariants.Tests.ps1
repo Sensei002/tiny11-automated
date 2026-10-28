@@ -295,10 +295,16 @@ Describe 'Windows Update stays gone' {
         # running. The only evidence that holds is a start attempt that is refused with
         # 1058, so the verifier has to attempt one and treat a successful start as the
         # failure case.
+        #
+        # sc.exe, not Start-Service: PowerShell's wrapper message is "Cannot start service
+        # X on computer '.'." and carries neither the code nor the word "disabled", so
+        # matching the exception reported every service as startable on a build where the
+        # lockdown was actually holding.
         $code = Get-ExecutableCode -Source $firstBootSource
         $code | Should -Match 'function\s+Test-ServiceStartBlocked'
-        $code | Should -Match 'Start-Service\s+-Name\s+\$Name'
+        $code | Should -Match 'sc\.exe\s+start\s+\$Name'
         $code | Should -Match '1058'
+        $code | Should -Match '\$LASTEXITCODE'
     }
 
     It 'waits long enough for wuauserv to actually stop' {
