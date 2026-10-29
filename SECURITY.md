@@ -274,7 +274,7 @@ These are intentional design decisions users should understand:
 
 2. **Disabled Features**
    - Windows Defender removed (Core/Nano variants)
-   - Windows Update disabled by default
+   - Windows Update paused until 3000 by default (the stack is intact, so it can be resumed)
    - TPM/SecureBoot bypassed
 
 3. **Registry Modifications**

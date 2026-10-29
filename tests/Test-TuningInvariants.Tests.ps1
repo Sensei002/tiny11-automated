@@ -267,17 +267,21 @@ Describe 'Windows Update stays gone' {
         $guard.Index | Should -BeLessThan $marker.Index
     }
 
-    It 'fails the build when the lockdown did not land in the image' {
-        # Every removal pass is best-effort against a system-owned hive and task tree,
-        # so a build that removed nothing logs identically to one that removed
-        # everything. Read the state back and fail, rather than shipping an ISO whose
-        # removal silently did nothing.
+    It 'fails the build when the requested state did not land in the image' {
+        # Every pass is best-effort against a system-owned hive and task tree, so a
+        # build that changed nothing logs identically to one that changed everything.
+        # Read the state back and fail, rather than shipping an ISO that behaves
+        # differently from what the build asked for.
+        #
+        # The assertion is mode-aware since pause replaced removal as the default:
+        # 'removed' requires Start=4 and no task folders, 'paused' and 'live' require
+        # the opposite, so one unchecked assertion would pass the wrong image.
         $code = Get-ExecutableCode -Source $builderSource['Core']
-        $code | Should -Match 'function\s+Assert-WindowsUpdateLockdown'
-        $code | Should -Match 'Assert-WindowsUpdateLockdown\s+-MountDir'
-        $assert = [regex]::Match($code, '(?m)^\s*Assert-WindowsUpdateLockdown\s+-MountDir')
+        $code | Should -Match 'function\s+Assert-WindowsUpdateState'
+        $code | Should -Match 'Assert-WindowsUpdateState\s+-MountDir'
+        $assert = [regex]::Match($code, '(?m)^\s*Assert-WindowsUpdateState\s+-MountDir\s+\$scratchDir\s+-Mode\s+\$WindowsUpdateMode')
         $unload = [regex]::Match($code, '(?m)^\s*Unload-RegistryHives\s*$')
-        $assert.Success | Should -BeTrue
+        $assert.Success | Should -BeTrue -Because 'the mode has to reach the assertion, or every build is checked as removed'
         $unload.Success | Should -BeTrue
         # The check is only authoritative while the hives are still loaded.
         $assert.Index | Should -BeLessThan $unload.Index
@@ -368,5 +372,78 @@ Describe 'Idle memory footprint' {
     ) {
         $code = Get-ExecutableCode -Source $builderSource[$Name]
         $code | Should -Not -Match "DisablePagingExecutive'\s+'REG_DWORD'\s+'1'"
+    }
+}
+
+Describe 'Windows Update pause' {
+
+    BeforeAll {
+        $firstBoot = Get-ExecutableCode -Source $firstBootSource
+        $builder = Get-ExecutableCode -Source $builderSource['Core']
+
+        $pauseMatch = [regex]::Match($firstBoot, '(?s)function Restore-WindowsUpdatePause \{.*?\n\}')
+        $pauseBody = $pauseMatch.Value
+    }
+
+    It 'travels the mode to the target machine instead of guessing it' {
+        # A paused image and a live one are identical in service state, task folders
+        # and binaries - only the pause keys differ, and those are exactly what a user
+        # is allowed to delete. So the payload has to be told.
+        $firstBoot | Should -Match 'function\s+Get-WindowsUpdateMode'
+        $firstBoot | Should -Match 'windowsUpdateMode'
+        $firstBoot | Should -Match 'gaming_groups\.json'
+    }
+
+    It 'defaults to removed for an image that predates the field' {
+        # Every image built before the mode existed shipped with the stack removed.
+        # Defaulting the other way would silently un-pause a machine that was built
+        # never to update.
+        $fn = [regex]::Match($firstBoot, '(?s)function Get-WindowsUpdateMode \{.*?\n\}').Value
+        $fn | Should -Not -BeNullOrEmpty
+        $fn | Should -Match "return 'removed'"
+    }
+
+    It 're-asserts the pause window with a cap large enough to hold it' {
+        # Without FlightSettingsMaxPauseDays the client clamps the window to the 35-day
+        # Settings maximum on the next scan, and the pause silently expires while the
+        # page still says it is paused.
+        $pauseBody | Should -Not -BeNullOrEmpty
+        $pauseBody | Should -Match 'FlightSettingsMaxPauseDays'
+        $pauseBody | Should -Match 'PauseUpdatesExpiryTime'
+        $pauseBody | Should -Match 'PauseQualityUpdatesEndTime'
+        $pauseBody | Should -Match 'PauseFeatureUpdatesEndTime'
+    }
+
+    It 'does not tear the update stack down while pausing' {
+        $pauseBody | Should -Not -Match 'Start-Service'
+        $pauseBody | Should -Not -Match 'Stop-Service'
+        $pauseBody | Should -Not -Match 'Unregister-ScheduledTask'
+        $pauseBody | Should -Not -Match 'Remove-Item'
+    }
+
+    It 'registers no boot guard in paused mode' {
+        # The guard exists because Windows repairs a REMOVED stack. A paused device is
+        # a supported state, so there is nothing to chase - and a guard that kept
+        # re-pausing would fight a user who deliberately resumed updates.
+        $paused = [regex]::Match($firstBoot, "(?s)'paused' \{\s*Restore-WindowsUpdatePause.*?\n        \}").Value
+        $paused | Should -Not -BeNullOrEmpty
+        $paused | Should -Not -Match 'Register-WindowsUpdateGuard'
+        $paused | Should -Match 'Remove-WindowsUpdateGuardTask'
+    }
+
+    It 'retires a guard task inherited from a removed image' {
+        # An upgrade or a mode change can leave the task behind; it would then keep
+        # disabling Windows Update behind the user's back.
+        $firstBoot | Should -Match 'function\s+Remove-WindowsUpdateGuardTask'
+        $firstBoot | Should -Match 'Unregister-ScheduledTask'
+        $guard = [regex]::Match($firstBoot, '(?s)function Invoke-WindowsUpdateGuard \{.*?\n\}').Value
+        $guard | Should -Match 'Remove-WindowsUpdateGuardTask'
+    }
+
+    It 'writes the same expiry the builder wrote' {
+        # A mismatch would ship a window that looks paused in the build log and is
+        # already expired on the machine.
+        $firstBoot | Should -Match "WindowsUpdatePauseExpiry = '3000-01-01T00:00:00Z'"
+        $builder | Should -Match "WindowsUpdatePauseExpiry = '3000-01-01T00:00:00Z'"
     }
 }

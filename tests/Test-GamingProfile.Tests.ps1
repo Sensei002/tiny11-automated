@@ -489,33 +489,37 @@ Describe 'Core-Gaming workflow' {
         }
     }
 
-    It 'adds a toggle for every gaming group' {
-        foreach ($input in @(
-            'hags', 'atlas_power_scheme', 'disable_cpu_idle', 'disable_security_mitigations',
-            'remove_xbox_gaming_stack', 'strip_background_noise', 'instant_windows',
-            'disable_fast_startup',
-            'network_latency_tweaks', 'disable_mpo', 'latency_input_tweaks', 'disable_fso',
-            'disable_game_mode', 'disable_printing'
-        )) {
+    It 'offers the gaming preset plus the two independent exceptions' {
+        # The workflow sits at GitHub's 25 workflow_dispatch input cap: a 26th input
+        # makes the whole file unparseable, and it then shows up named after its path
+        # and runs as a 0-job failure. The 14 group switches still exist - on the
+        # builder as -GamingGroups, in config/gaming_profile.json, and as a group
+        # editor in the local GUI - so the workflow only has to offer the preset, the
+        # one group with a documented hardware downside, and HAGS.
+        foreach ($input in @('gaming_tweaks', 'disable_cpu_idle', 'hags', 'pause_windows_update')) {
             $workflowRaw | Should -Match "(?m)^\s{6}$([regex]::Escape($input)):"
         }
     }
 
-    It 'declares exactly one toggle per profile group' {
-        # Catches a group added to the profile but never exposed in the workflow UI.
-        # Slice to the workflow_dispatch block so unrelated 6-space keys (e.g. the
-        # permissions entries) are not picked up.
+    It 'no longer declares a toggle per profile group' {
+        # A regression here means the collapse was partly undone, which is how the
+        # input cap gets hit again.
         $start = $workflowRaw.IndexOf('workflow_dispatch:')
         $end   = $workflowRaw.IndexOf("`nenv:", $start)
-        $start | Should -BeGreaterThan 0
-        $end   | Should -BeGreaterThan $start
         $inputsBlock = $workflowRaw.Substring($start, $end - $start)
 
-        $gamingInputs = [regex]::Matches($inputsBlock, '(?m)^\s{6}([a-z_]+):') |
-            ForEach-Object { $_.Groups[1].Value }
-
         foreach ($group in @($profile.defaultGroups.PSObject.Properties.Name)) {
-            $gamingInputs | Should -Contain $group
+            if ($group -eq 'disable_cpu_idle') { continue }
+            $inputsBlock | Should -Not -Match "(?m)^\s{6}$([regex]::Escape($group)):"
+        }
+    }
+
+    It 'names every profile group when the preset is turned off' {
+        # gaming_tweaks off has to force every group off explicitly, or a group added
+        # to the profile later would stay enabled in a "bare Core" build.
+        foreach ($group in @($profile.defaultGroups.PSObject.Properties.Name)) {
+            if ($group -eq 'disable_cpu_idle') { continue }
+            $workflowRaw | Should -Match ([regex]::Escape("'$group'"))
         }
     }
 
@@ -633,32 +637,69 @@ Describe 'Profile engine functional behaviour' {
     }
 }
 
-Describe 'Core-Gaming always removes Defender and Windows Update' {
+Describe 'Windows Update modes' {
 
     BeforeAll {
         $builder = Get-Content -LiteralPath $builderPath -Raw
         $gamingGate = [regex]::Escape('if ($RemoveDefender -or $GamingProfile) {')
+
+        # The pause function body, so the "pause does not disable anything" tests read
+        # the implementation rather than the whole file.
+        $pauseMatch = [regex]::Match($builder, '(?s)function Set-WindowsUpdatePause \{.*?\n\}')
+        $pauseBody = $pauseMatch.Value
     }
 
-    It 'defines the Windows Update removal functions' {
+    It 'defines all three Windows Update passes' {
         $builder | Should -Match 'function Remove-WindowsUpdatePayload'
         $builder | Should -Match 'function Remove-WindowsUpdateStack'
+        $builder | Should -Match 'function Set-WindowsUpdatePause'
     }
 
-    It 'calls both halves of the Windows Update removal under the gaming gate' {
+    It 'gates both halves of the removal behind the removed mode' {
+        # Removal is no longer the default, so an unguarded call here would ship a
+        # non-serviceable image whatever the build asked for.
         foreach ($fn in @('Remove-WindowsUpdatePayload', 'Remove-WindowsUpdateStack')) {
             $callIndex = Get-MainCallIndex -Content $builder -Name $fn
             $callIndex | Should -BeGreaterThan 0
 
-            # The nearest preceding gate must be the plain -GamingProfile one, not
-            # something weaker that a Core build could also satisfy.
-            $gateIndex = $builder.Substring(0, $callIndex).LastIndexOf('if ($GamingProfile)')
+            $gateIndex = $builder.Substring(0, $callIndex).LastIndexOf('$WindowsUpdateMode -eq ''removed''')
             $gateIndex | Should -BeGreaterThan 0
             ($callIndex - $gateIndex) | Should -BeLessThan 200
         }
     }
 
-    It 'disables the three services that make a WU disable stick' {
+    It 'writes the pause window only in the paused branch' {
+        $callIndex = Get-MainCallIndex -Content $builder -Name 'Set-WindowsUpdatePause'
+        $callIndex | Should -BeGreaterThan 0
+
+        $gateIndex = $builder.Substring(0, $callIndex).LastIndexOf('$WindowsUpdateMode -eq ''paused''')
+        $gateIndex | Should -BeGreaterThan 0
+        ($callIndex - $gateIndex) | Should -BeLessThan 200
+    }
+
+    It 'pauses until the year 3000 and raises the client pause cap' {
+        # FlightSettingsMaxPauseDays is the whole feature: the client clamps the pause
+        # window to the 35-day Settings maximum unless it is raised, and a clamped
+        # window looks identical in Settings while the client keeps scanning.
+        $builder | Should -Match ([regex]::Escape("`$script:WindowsUpdatePauseExpiry = '3000-01-01T00:00:00Z'"))
+        $pauseBody | Should -Match 'FlightSettingsMaxPauseDays'
+        $pauseBody | Should -Match "'3650000'"
+        foreach ($value in @('PauseUpdatesExpiryTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime')) {
+            $pauseBody | Should -Match ([regex]::Escape($value))
+        }
+    }
+
+    It 'does not disable a service, delete a task or hide the page while pausing' {
+        # A paused device is a supported state, so nothing has to be torn out to hold
+        # it - and tearing things out is what made Windows repair the stack.
+        $pauseBody | Should -Not -BeNullOrEmpty
+        $pauseBody | Should -Not -Match ([regex]::Escape("'Start' 'REG_DWORD' '4'"))
+        $pauseBody | Should -Not -Match 'Remove-Item'
+        $pauseBody | Should -Not -Match 'SettingsPageVisibility'
+        $pauseBody | Should -Not -Match 'Unregister-ScheduledTask'
+    }
+
+    It 'disables the three services that make a WU disable stick, only when removing' {
         # WaaSMedicSvc repairs a disabled Windows Update, UsoSvc runs the boot
         # servicing pass, wuauserv is Windows Update itself. Leaving any of them is
         # what lets "Updates are underway, do not turn off your PC" come back.
@@ -671,22 +712,56 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
         }
         $builder | Should -Not -Match "Remove-Item[^\r\n]*Services\\wuauserv"
         $builder | Should -Not -Match "Remove-RegistryKey[^\r\n]*Services\\wuauserv"
+
+        # Slice to the function that owns the write: the same literals appear in the
+        # removal function too, so searching the whole file answers the wrong question.
+        $fn = [regex]::Match($builder, '(?s)function Apply-RegistryTweaks \{.*?\n\}').Value
+        $fn | Should -Not -BeNullOrEmpty
+
+        $gate = $fn.IndexOf("if (`$WindowsUpdateMode -eq 'removed') {")
+        $loop = $fn.IndexOf("@('wuauserv', 'UsoSvc', 'WaaSMedicSvc')")
+        # Search from the loop header: Apply-RegistryTweaks disables other services
+        # (dmwappushservice, Defender) earlier in the same function with the same
+        # value, so the first match in the slice belongs to a different tweak.
+        $start = $fn.IndexOf("'Start' 'REG_DWORD' '4'", $loop)
+        $gate | Should -BeGreaterThan 0 -Because 'the service disable must sit inside the removal branch'
+        $loop | Should -BeGreaterThan $gate
+        $start | Should -BeGreaterThan $loop
     }
 
-    It 'removes the Update Orchestrator scheduled tasks' {
-        $builder | Should -Match ([regex]::Escape('Tasks\Microsoft\Windows\UpdateOrchestrator'))
+    It 'removes the Update Orchestrator scheduled tasks, only when removing' {
+        # Under 'paused' these folders have to stay: WaaSMedic does not touch a paused
+        # device, and the orchestrator is what reads the pause window.
+        $fn = [regex]::Match($builder, '(?s)function Remove-ScheduledTasks \{.*?\n\}').Value
+        $fn | Should -Not -BeNullOrEmpty
+
+        $gate = $fn.IndexOf("if (`$WindowsUpdateMode -eq 'removed') {")
+        # Case-sensitive IndexOf, and the literal in the script is "$tasksPath\Microsoft\...",
+        # so match from "Windows\UpdateOrchestrator" rather than from "Tasks".
+        $task = $fn.IndexOf('Windows\UpdateOrchestrator')
+        $gate | Should -BeGreaterThan 0
+        $task | Should -BeGreaterThan $gate
     }
 
-    It 'sets the NoAutoUpdate policy' {
-        $builder | Should -Match ([regex]::Escape("WindowsUpdate\AU' 'NoAutoUpdate'"))
+    It 'sets the NoAutoUpdate policy only in the removal branch' {
+        # NoAutoUpdate makes the Settings page report a managed state, which is the
+        # opposite of what a paused image is supposed to show.
+        $fn = [regex]::Match($builder, '(?s)function Apply-RegistryTweaks \{.*?\n\}').Value
+        $fn | Should -Not -BeNullOrEmpty
+
+        $gate = $fn.IndexOf("if (`$WindowsUpdateMode -eq 'removed') {")
+        $noAuto = $fn.IndexOf("WindowsUpdate\AU' 'NoAutoUpdate'")
+        $gate | Should -BeGreaterThan 0
+        $noAuto | Should -BeGreaterThan $gate
     }
 
-    It 'hides both Settings pages using valid Windows 11 page ids' {
+    It 'hides the Windows Update page only when the stack is removed' {
         # Page ids are the ms-settings URI minus the 'ms-settings:' prefix. The
         # Windows Security page is 'windowsdefender'; 'virus' is not a page id.
-        # Asserted against the write itself rather than the bare string, so the
-        # comment above the write site can keep documenting the old broken value.
-        $builder | Should -Match 'hide:windowsupdate;windowsdefender'
+        # Under 'paused' the page is the only place the pause is visible and the only
+        # way back, so hiding it would turn a reversible state into a mystery.
+        $builder | Should -Match ([regex]::Escape("`$hiddenPages = 'windowsupdate;windowsdefender'"))
+        $builder | Should -Match ([regex]::Escape('hide:$hiddenPages'))
         $builder | Should -Not -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:virus"))
     }
 
@@ -711,19 +786,19 @@ Describe 'Core-Gaming always removes Defender and Windows Update' {
         ([regex]::Matches($builder, $gamingGate)).Count | Should -Be 2
     }
 
-    It 'leaves the plain Core Windows Update disable in place' {
-        # Regression guard: a plain Core build must keep the Start=4 disable for all
-        # three services. The localhost WSUS redirect is deliberately gone - pointing
-        # the client at http://localhost is what made the Settings page render
-        # "An error occurred" - so the access policy plus the disabled services are
-        # what hold now.
-        $builder | Should -Match ([regex]::Escape("Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess'"))
-        $builder | Should -Match ([regex]::Escape("@('wuauserv', 'UsoSvc', 'WaaSMedicSvc')"))
-        $builder | Should -Match '\$wuService'
-        $builder | Should -Match ([regex]::Escape("'Start' 'REG_DWORD' '4'"))
-        $builder | Should -Not -Match "'WUServer'"
-        $builder | Should -Not -Match "'UseWUServer'"
-        $builder | Should -Match ([regex]::Escape("SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'"))
+    It 'verifies the state it was asked for, for every Core build' {
+        # The pause is the default for all of them now, so an unverified pause is
+        # exactly as bad as an unverified removal.
+        $builder | Should -Match 'function Assert-WindowsUpdateState'
+
+        $assert = [regex]::Match($builder, '(?m)^\s*Assert-WindowsUpdateState\s+-MountDir\s+\$scratchDir\s+-Mode\s+\$WindowsUpdateMode')
+        $assert.Success | Should -BeTrue -Because 'the mode has to reach the assertion, or every build is checked as removed'
+
+        # LastIndexOf, not IndexOf: the function definition of Unload-RegistryHives
+        # sits near the top of the file and would satisfy an IndexOf comparison
+        # without proving anything about the call order.
+        $unload = $builder.LastIndexOf('Unload-RegistryHives')
+        $assert.Index | Should -BeLessThan $unload
     }
 
     It 'does not touch DoSvc, which belongs to the profile groups' {

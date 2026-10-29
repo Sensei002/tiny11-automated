@@ -74,7 +74,7 @@ Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 
 - 🛡️ **Enhanced Telemetry Blocking**: Stronger privacy protection with additional registry tweaks
 - 🎮 **VRAM Gaming Optimization**: Improved graphics performance through DirectX registry optimizations
 - ⚡ **Build-Specific Service Removal**: 4 services (Standard), 13 services (Core), 14 services (Nano)
-- 🚫 **Windows Update Binary Removal**: Core/Nano builds now remove WU binaries (~300 MB saved)
+- ⏸️ **Windows Update Paused, Not Removed**: Core builds keep the update stack intact and ship it paused until 3000 (~300 MB stays, but the Settings page reports a real state and the revert script can undo it). Nano still removes the binaries
 
 **Total Additional Savings:**
 - Standard: ~120 MB
@@ -300,7 +300,7 @@ Siege on a CPU-bound machine.
 | **Behaviour** | Game Mode **off** (AtlasOS default) · Fast Startup off · Search indexing off · Bluetooth off · printing removed · background apps denied · visual effects off |
 | **Xbox** | Xbox Live Auth, Game Save, Networking, Accessory Management, Gaming Services removed |
 | **Essentials** | The post-install debloat pass, **baked in and always on**: activity history, BitLocker auto-encryption, delivery optimization, location, telemetry, WPBT, OneDrive, Windows AI, Widgets, Store recommendations, device companion apps, the classic right-click and Start layouts, plus **58 services** moved to manual or disabled. Takes a fresh install from ~100–115 processes to **50–65**. No toggle — see [GAMING.md](GAMING.md#the-essentials-pass) |
-| **Defender & Update** | Windows Defender / Security **removed outright**, plus the entire Windows Update stack — service, Update Medic, Update Orchestrator and the Settings entry. Always on for Core-Gaming; not a group toggle |
+| **Defender & Update** | Windows Defender / Security **removed outright** — always on for Core-Gaming, not a group toggle. Windows Update is **not removed**: the stack stays intact and ships paused until 3000, controlled by the `pause_windows_update` toggle. See [GAMING.md](GAMING.md#defender-is-removed-windows-update-is-paused-not-removed) |
 
 Game runtimes (VC++, DirectX 9.0c, .NET Desktop) are deliberately **not** bundled — see
 [GAMING.md](GAMING.md#game-runtimes) for why and what to install yourself.
@@ -314,7 +314,7 @@ can dial any of it back per build.
 **Locally:**
 
 ```powershell
-# Full Core-Gaming build (Defender + Windows Update are removed automatically)
+# Full Core-Gaming build (Defender removed; Windows Update ships paused until 3000)
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile
 
 # Dial specific groups back
@@ -653,7 +653,7 @@ account screen.
 - LA57 CPU compatibility layer
 - Language features (OCR, Speech, Handwriting)
 - Windows Defender (Nano by default; Core via `-RemoveDefender` / the `remove_defender` workflow input; always removed on Core-Gaming)
-- Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings entry (hidden via policy; Core-Gaming only — a plain Core build only disables it)
+- Windows Update — **not removed by default**. The stack stays and is paused until 3000 (`pause_windows_update`). Only `-WindowsUpdateMode removed` disables the services, deletes the client and hides the Settings entry
 - Printer drivers (Nano only)
 - Scanner/MFD drivers (Nano only)
 
@@ -700,8 +700,8 @@ account screen.
 - Telemetry services disabled
 
 **Update & Cloud:**
-- Windows Update disabled (can be manually enabled in Standard)
-- Windows Update binaries removed (Core/Nano - NON-SERVICEABLE)
+- Windows Update **paused until 3000** on Core (the stack is intact; `pause_windows_update` unchecked gives stock behaviour)
+- Windows Update binaries removed on Nano only (NON-SERVICEABLE)
 - OneDrive backup prompts disabled
 - Teams auto-install blocked
 - New Outlook installation blocked
@@ -939,7 +939,7 @@ remove_defender:        # 🆕 Completely remove Windows Defender / Security
   type: boolean
   default: false
   # No Antimalware service will be present in the finished image
-  # Redundant on Core-Gaming, which always removes Defender and Windows Update
+  # Redundant on Core-Gaming, which always removes Defender
 
 account_setup:          # 🆕 Local account setup
   type: choice
@@ -1276,8 +1276,9 @@ Get-FileHash -Path "tiny11.iso" -Algorithm SHA256
    - Keep antivirus updated
    - Consider using Standard variant for better security
 
-3. **Updates Disabled by Default**
-   - Manually enable if needed: `services.msc` → Windows Update
+3. **Updates Paused by Default**
+   - Windows Update ships paused until 3000; resume it in Settings → Windows Update, or run `Undo-GamingTweaks.ps1`
+   - On a Core image a resumed update will most likely fail: `Optimize-WinSxS` leaves the client with nothing to patch from
    - No automatic security patches
    - Monitor security advisories manually
 

@@ -95,7 +95,7 @@ on:
         required: false
         default: false
       remove_defender:
-        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender and the whole Windows Update stack.'
+        description: 'Completely remove Windows Defender / Security - no Antimalware service will be present in the finished image. Redundant on this workflow: Core-Gaming always removes Defender.'
         type: boolean
         required: false
         default: false
@@ -116,10 +116,32 @@ on:
           - 'required'
           - 'best-effort'
           - 'off'
+      pause_windows_update:
+        description: 'Keep the Windows Update stack installed but paused until the year 3000. Checked (default): nothing is removed, so Settings shows a real paused state and the revert script can resume it - the machine stays quiet without Windows trying to repair a broken stack. Unchecked: Windows Update behaves exactly like a stock Windows 11 install.'
+        type: boolean
+        required: false
+        default: true
 
-      # ---------------- Gaming profile groups ----------------
+      # ---------------- Gaming profile ----------------
+      #
+      # One preset plus two exceptions. The 14 group booleans that used to live here
+      # are gone: this workflow sits at GitHub's 25 workflow_dispatch input cap, and a
+      # 26th input makes the whole file unparseable - it then shows up in the Actions
+      # UI named after its path and runs as a 0-job failure. The per-group switches
+      # still exist, in config/gaming_profile.json, in the local builder's group
+      # editor, and on the builder as -GamingGroups.
+      gaming_tweaks:
+        description: 'Gaming: apply the full Core-Gaming tweak set (all 14 profile groups at their defaults: power scheme, security mitigations off, Xbox stack removed, background noise stripped, instant windows, MPO off, input latency, interrupt latency, FSO off, Game Mode off, printing off). Uncheck for a bare Core image with only the two exceptions below.'
+        type: boolean
+        required: false
+        default: true
+      disable_cpu_idle:
+        description: 'Gaming: Force CPU to C-State 0 (no idle). OFF by default - it stops turbo on a lot of hardware (a 3.6 GHz CPU then reads 3.4 GHz) and raises idle power. Enable only if you measured a wake-latency win. Independent of gaming_tweaks.'
+        type: boolean
+        required: false
+        default: false
       hags:
-        description: 'Gaming: Hardware Accelerated GPU Scheduling. "on" forces it on, "off" forces it off, "leave" keeps the Core default.'
+        description: 'Gaming: Hardware Accelerated GPU Scheduling. "on" forces it on, "off" forces it off, "leave" keeps the Core default. Independent of gaming_tweaks.'
         type: choice
         required: false
         default: 'on'
@@ -127,76 +149,6 @@ on:
           - 'on'
           - 'off'
           - 'leave'
-      atlas_power_scheme:
-        description: 'Gaming: AtlasOS-style power scheme (no CPU parking, no USB/PCIe power saving, 100% min processor state).'
-        type: boolean
-        required: false
-        default: true
-      disable_cpu_idle:
-        description: 'Gaming: Force CPU to C-State 0 (no idle). OFF by default - it stops turbo on a lot of hardware (a 3.6 GHz CPU then reads 3.4 GHz) and raises idle power. Enable only if you measured a wake-latency win.'
-        type: boolean
-        required: false
-        default: false
-      disable_security_mitigations:
-        description: 'Gaming: Disable VBS, Memory Integrity (HVCI), Credential Guard, System Guard and Spectre/Meltdown mitigations. Biggest FPS lever - and a real security downgrade.'
-        type: boolean
-        required: false
-        default: true
-      remove_xbox_gaming_stack:
-        description: 'Gaming: Remove the Xbox Live / Gaming Services stack. BREAKS Game Pass, Microsoft Store games and Play Anywhere titles.'
-        type: boolean
-        required: false
-        default: true
-      strip_background_noise:
-        description: 'Gaming: Disable Windows Search indexing, Bluetooth, Delivery Optimization, background apps, visual effects and scripted diagnostics.'
-        type: boolean
-        required: false
-        default: true
-      instant_windows:
-        description: 'Gaming: Fastest window open/close - removes window/menu/hover animations and shell delays, and shortens the app-close timeouts (WaitToKillAppTimeout 20s -> 2s).'
-        type: boolean
-        required: false
-        default: true
-      disable_fast_startup:
-        description: 'Gaming: Disable hibernation and Fast Startup (Hiberboot).'
-        type: boolean
-        required: false
-        default: true
-      network_latency_tweaks:
-        description: 'Gaming: Disable Nagle, free the QoS reserved bandwidth, stop Delivery Optimization seeding, block WU auto-reboot.'
-        type: boolean
-        required: false
-        default: true
-      disable_mpo:
-        description: 'Gaming: Disable Multi-Plane Overlay. Fixes flicker / micro-stutter on some NVIDIA and AMD drivers.'
-        type: boolean
-        required: false
-        default: true
-      latency_input_tweaks:
-        description: 'Gaming: Disable mouse acceleration and accessibility hotkeys; enable the DXGI flip model; turn off USB 3 link power management.'
-        type: boolean
-        required: false
-        default: true
-      interrupt_latency:
-        description: 'Gaming: Per-device latency work at first boot - MSI interrupts with high priority for GPU/NIC, NIC interrupt moderation off + RSS on, USB/HID power management off. Targets 1% lows rather than average FPS.'
-        type: boolean
-        required: false
-        default: true
-      disable_fso:
-        description: 'Gaming: Force true fullscreen exclusive instead of Fullscreen Optimizations.'
-        type: boolean
-        required: false
-        default: true
-      disable_game_mode:
-        description: 'Gaming: Disable Windows Game Mode (AtlasOS default - its useful work is already done by disabling WU/telemetry/background apps).'
-        type: boolean
-        required: false
-        default: true
-      disable_printing:
-        description: 'Gaming: Disable print services and remove the printing optional features.'
-        type: boolean
-        required: false
-        default: true
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -662,27 +614,37 @@ jobs:
           $accountSetup = "${{ github.event.inputs.account_setup }}"
           if ([string]::IsNullOrWhiteSpace($accountSetup)) { $accountSetup = 'auto-admin' }
 
-          # Map the workflow toggles onto the profile's group names. Any group left
-          # out here falls back to its default in config/gaming_profile.json.
-          $gamingGroups = @{
-            atlas_power_scheme          = ("${{ github.event.inputs.atlas_power_scheme }}"          -eq 'true')
-            disable_cpu_idle            = ("${{ github.event.inputs.disable_cpu_idle }}"            -eq 'true')
-            disable_security_mitigations = ("${{ github.event.inputs.disable_security_mitigations }}" -eq 'true')
-            remove_xbox_gaming_stack    = ("${{ github.event.inputs.remove_xbox_gaming_stack }}"    -eq 'true')
-            strip_background_noise      = ("${{ github.event.inputs.strip_background_noise }}"      -eq 'true')
-            instant_windows             = ("${{ github.event.inputs.instant_windows }}"             -eq 'true')
-            disable_fast_startup        = ("${{ github.event.inputs.disable_fast_startup }}"        -eq 'true')
-            network_latency_tweaks      = ("${{ github.event.inputs.network_latency_tweaks }}"      -eq 'true')
-            disable_mpo                 = ("${{ github.event.inputs.disable_mpo }}"                 -eq 'true')
-            latency_input_tweaks        = ("${{ github.event.inputs.latency_input_tweaks }}"        -eq 'true')
-            interrupt_latency           = ("${{ github.event.inputs.interrupt_latency }}"           -eq 'true')
-            disable_fso                 = ("${{ github.event.inputs.disable_fso }}"                 -eq 'true')
-            disable_game_mode           = ("${{ github.event.inputs.disable_game_mode }}"           -eq 'true')
-            disable_printing            = ("${{ github.event.inputs.disable_printing }}"            -eq 'true')
+          # One preset plus two exceptions.
+          #
+          # gaming_tweaks on  -> no overrides at all, so every group takes its default
+          #                      from config/gaming_profile.json.
+          # gaming_tweaks off -> every group forced off, which leaves a bare Core image
+          #                      plus whatever the two exceptions below ask for.
+          #
+          # disable_cpu_idle is always written explicitly rather than left to the
+          # profile default: it is the one group with a documented hardware downside, so
+          # turning the preset on must not quietly enable it.
+          $gamingTweaks = ("${{ github.event.inputs.gaming_tweaks }}" -ne 'false')
+          $disableCpuIdle = ("${{ github.event.inputs.disable_cpu_idle }}" -eq 'true')
+
+          $gamingGroups = @{}
+          if (-not $gamingTweaks) {
+            foreach ($group in @(
+              'atlas_power_scheme', 'disable_security_mitigations', 'remove_xbox_gaming_stack',
+              'strip_background_noise', 'instant_windows', 'disable_fast_startup',
+              'network_latency_tweaks', 'disable_mpo', 'latency_input_tweaks',
+              'interrupt_latency', 'disable_fso', 'disable_game_mode', 'disable_printing'
+            )) { $gamingGroups[$group] = $false }
           }
+          $gamingGroups['disable_cpu_idle'] = $disableCpuIdle
 
           $hagsMode = "${{ github.event.inputs.hags }}"
           if ([string]::IsNullOrWhiteSpace($hagsMode)) { $hagsMode = 'on' }
+
+          # Paused is the default, so an unset input must mean paused rather than live.
+          $pauseUpdates = ("${{ github.event.inputs.pause_windows_update }}" -ne 'false')
+          $windowsUpdateMode = 'live'
+          if ($pauseUpdates) { $windowsUpdateMode = 'paused' }
 
           Write-Output "=== Starting Tiny11 Core-Gaming Builder ==="
           Write-Output "ISO Drive: $($params.ISO)"
@@ -692,11 +654,9 @@ jobs:
           Write-Output "Remove Defender: $removeDefender"
           Write-Output "Account setup: $accountSetup"
           Write-Output "HAGS: $hagsMode"
-          Write-Output "Gaming groups:"
-          foreach ($name in ($gamingGroups.Keys | Sort-Object)) {
-            $state = if ($gamingGroups[$name]) { 'ON ' } else { 'off' }
-            Write-Output "  [$state] $name"
-          }
+          Write-Output "Gaming tweaks: $gamingTweaks"
+          Write-Output "  [$(if ($disableCpuIdle) { 'ON ' } else { 'off' })] disable_cpu_idle (C-State 0)"
+          Write-Output "Windows Update mode: $windowsUpdateMode"
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
           $startTime = Get-Date
@@ -707,7 +667,8 @@ jobs:
             -AccountSetup $accountSetup `
             -GamingProfile `
             -GamingGroups $gamingGroups `
-            -HagsMode $hagsMode
+            -HagsMode $hagsMode `
+            -WindowsUpdateMode $windowsUpdateMode
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Core-Gaming build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"
@@ -820,10 +781,13 @@ jobs:
           HAGS: ${{ github.event.inputs.hags }}
 
           SECURITY FEATURES DISABLED
-            VBS / Memory Integrity / Credential Guard : ${{ github.event.inputs.disable_security_mitigations }}
-            Spectre / Meltdown mitigations             : ${{ github.event.inputs.disable_security_mitigations }}
+            VBS / Memory Integrity / Credential Guard : ${{ github.event.inputs.gaming_tweaks }}
+            Spectre / Meltdown mitigations             : ${{ github.event.inputs.gaming_tweaks }}
             Windows Defender removed                   : ${{ github.event.inputs.remove_defender }}
             Hypervisor (hypervisorlaunchtype)          : off
+
+          WINDOWS UPDATE
+            Mode: ${{ github.event.inputs.pause_windows_update == 'false' && 'live (stock Windows Update)' || 'paused until 3000-01-01' }}
 
           Revert script inside the image:
             C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1
@@ -1096,19 +1060,10 @@ jobs:
             ### ⚡ Applied in this build
             | Group | State |
             |-------|-------|
-            | AtlasOS-style power scheme | ${{ github.event.inputs.atlas_power_scheme == 'true' && '✅' || '❌' }} |
+            | Gaming tweaks (full preset) | ${{ github.event.inputs.gaming_tweaks == 'false' && '❌' || '✅' }} |
             | CPU idle disabled (C-State 0) | ${{ github.event.inputs.disable_cpu_idle == 'true' && '✅' || '❌' }} |
-            | Security mitigations off | ${{ github.event.inputs.disable_security_mitigations == 'true' && '✅' || '❌' }} |
-            | Xbox / Gaming Services removed | ${{ github.event.inputs.remove_xbox_gaming_stack == 'true' && '✅' || '❌' }} |
-            | Background noise stripped | ${{ github.event.inputs.strip_background_noise == 'true' && '✅' || '❌' }} |
-            | Instant window open/close | ${{ github.event.inputs.instant_windows == 'true' && '✅' || '❌' }} |
-            | Fast Startup disabled | ${{ github.event.inputs.disable_fast_startup == 'true' && '✅' || '❌' }} |
-            | Network latency tweaks | ${{ github.event.inputs.network_latency_tweaks == 'true' && '✅' || '❌' }} |
-            | MPO disabled | ${{ github.event.inputs.disable_mpo == 'true' && '✅' || '❌' }} |
-            | Input latency tweaks | ${{ github.event.inputs.latency_input_tweaks == 'true' && '✅' || '❌' }} |
-            | Fullscreen Optimizations off | ${{ github.event.inputs.disable_fso == 'true' && '✅' || '❌' }} |
-            | Game Mode off | ${{ github.event.inputs.disable_game_mode == 'true' && '✅' || '❌' }} |
-            | Printing disabled | ${{ github.event.inputs.disable_printing == 'true' && '✅' || '❌' }} |
+            | HAGS | ${{ github.event.inputs.hags }} |
+            | Windows Update | ${{ github.event.inputs.pause_windows_update == 'false' && 'live' || 'paused until 3000-01-01' }} |
 
             ### ⚠️ Security Notice
             This image disables VBS / Memory Integrity, Credential Guard and the
@@ -1123,11 +1078,21 @@ jobs:
 
             ### ❌ What's Removed
             - **Windows Component Store (WinSxS)**
-            - **Windows Update Service**
             - **Xbox / Gaming Services** (breaks Game Pass and Microsoft Store games)
             - **Printing** (services and optional features)
             - Microsoft Edge, OneDrive, Teams, Copilot, Chat
             - Telemetry, diagnostics, background apps
+
+            ### 🔄 Windows Update
+            The update stack is **not removed**. It ships intact and paused until
+            3000-01-01, so Settings shows a real paused state instead of a broken one,
+            and `Undo-GamingTweaks.ps1` can resume it by clearing the pause keys.
+
+            Be aware that a Core image also minimises WinSxS, so resuming updates on
+            this build will most likely fail to install them. The pause exists to keep
+            the machine quiet and reversible — it is not a promise that the image can
+            be patched later. Build with `pause_windows_update` unchecked for stock
+            Windows Update behaviour.
 
             ### 🔒 Checksums
 

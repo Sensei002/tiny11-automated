@@ -39,9 +39,10 @@
 param(
     [string]$GamingDir = (Join-Path $env:WINDIR 'Tiny11Gaming'),
     [switch]$Force,
-    # Boot-guard mode. Invoked by the WindowsUpdateGuard scheduled task on each boot
-    # until the lockdown has held for $script:GuardBoots boots, then the task removes
-    # itself. Not for interactive use - it deliberately ignores the completion marker.
+    # Boot-guard mode, used only when the image shipped with the update stack removed.
+    # Invoked by the WindowsUpdateGuard scheduled task on every boot to re-assert a
+    # state that Windows actively repairs. Not for interactive use - it deliberately
+    # ignores the completion marker.
     [switch]$WuGuard
 )
 
@@ -618,6 +619,86 @@ function Invoke-EssentialsFirstBoot {
 #
 # So the offline pass is not the last word. This runs on the target, after that
 # pass, and re-asserts the identical state. It is idempotent and safe to re-run.
+#
+# Everything above applies only when the image shipped with the stack REMOVED. Under
+# the 'paused' default the stack is intact and merely told to stop, and none of that
+# reasoning holds: Windows does not repair a paused device, so there is nothing to
+# chase and no guard is registered.
+
+$script:WindowsUpdatePauseExpiry = '3000-01-01T00:00:00Z'
+$script:WindowsUpdatePauseMaxDays = 3650000
+
+function Get-WindowsUpdateMode {
+    # The mode travels in gaming_groups.json rather than being inferred from the
+    # machine: a paused image and a live one are byte-for-byte identical in service
+    # state, task folders and binaries. Only the pause keys differ, and those are
+    # exactly what a user is allowed to delete.
+    $file = Join-Path $GamingDir 'gaming_groups.json'
+    if (Test-Path -LiteralPath $file) {
+        try {
+            $json = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+            $prop = $json.PSObject.Properties['windowsUpdateMode']
+            if ($prop -and $prop.Value -in @('paused', 'live', 'removed')) { return [string]$prop.Value }
+        } catch { }
+    }
+
+    # No field means an image built before the mode existed, and those all shipped with
+    # the stack removed. Defaulting to 'removed' keeps such a machine behaving exactly
+    # as it did, instead of silently un-pausing something built never to update.
+    return 'removed'
+}
+
+function Restore-WindowsUpdatePause {
+    # Idempotent re-assert of the pause window on the target machine.
+    #
+    # The builder already wrote these values into the offline hive. Repeating them here
+    # makes the first-boot log record which mode the image is in, and means a servicing
+    # pass that rewrote UX\Settings cannot leave the machine quietly unpaused.
+    #
+    # Nothing here disables a service, deletes a task folder or hides the Settings page.
+    # A paused device is a supported state, so Windows has no reason to repair it - and
+    # that is precisely why this needs no repeating guard.
+    $settings = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+    if (-not (Test-Path $settings)) { New-Item -Path $settings -Force -ErrorAction SilentlyContinue | Out-Null }
+
+    $start = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $values = [ordered]@{
+        FlightSettingsMaxPauseDays   = $script:WindowsUpdatePauseMaxDays
+        PauseUpdatesStartTime        = $start
+        PauseUpdatesExpiryTime       = $script:WindowsUpdatePauseExpiry
+        PauseFeatureUpdatesStartTime = $start
+        PauseFeatureUpdatesEndTime   = $script:WindowsUpdatePauseExpiry
+        PauseQualityUpdatesStartTime = $start
+        PauseQualityUpdatesEndTime   = $script:WindowsUpdatePauseExpiry
+    }
+
+    foreach ($name in $values.Keys) {
+        $type = 'String'
+        if ($name -eq 'FlightSettingsMaxPauseDays') { $type = 'DWord' }
+        Set-ItemProperty -Path $settings -Name $name -Value $values[$name] -Type $type -ErrorAction SilentlyContinue
+    }
+
+    # Verify by reading back. The pause window is client-enforced, so a write that did
+    # not land is indistinguishable from a pause that is about to expire silently.
+    $expiry = (Get-ItemProperty -Path $settings -Name 'PauseUpdatesExpiryTime' -ErrorAction SilentlyContinue).PauseUpdatesExpiryTime
+    if ("$expiry" -eq $script:WindowsUpdatePauseExpiry) {
+        Write-Log "  verified: Windows Update paused until $expiry" 'SUCCESS'
+    } else {
+        Write-Log "  could not set the pause window (read back '$expiry')" 'WARN'
+        $script:Failures++
+    }
+}
+
+function Remove-WindowsUpdateGuardTask {
+    # A paused image has nothing to chase, and a guard inherited from an image that
+    # shipped with the stack removed would keep re-disabling Windows Update behind a
+    # user who deliberately resumed it. Remove it rather than leave it dormant.
+    $task = Get-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath -ErrorAction SilentlyContinue
+    if (-not $task) { return }
+    Unregister-ScheduledTask -TaskName $script:GuardTaskName -TaskPath $script:GuardTaskPath -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Log "  removed the leftover Windows Update guard task"
+}
+
 function Test-GamingGroupEnabled {
     param([string]$Name)
 
@@ -631,7 +712,11 @@ function Test-GamingGroupEnabled {
     if (Test-Path -LiteralPath $file) {
         try {
             $flags = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
-            if ($flags.PSObject.Properties.Name -contains $Name) { return [bool]$flags.$Name }
+            # The flags are nested under .groups - reading them off the root object
+            # always missed, which silently turned every lookup into "enabled".
+            if ($flags.groups -and $flags.groups.PSObject.Properties.Name -contains $Name) {
+                return [bool]$flags.groups.$Name
+            }
         } catch { }
     }
     return $true
@@ -900,6 +985,17 @@ function Register-WindowsUpdateGuard {
 
 function Invoke-WindowsUpdateGuard {
     # -WuGuard entry point. Runs on every boot, then on the repetition interval.
+    #
+    # Only an image that shipped with the stack removed needs this. If the task
+    # survived into a paused or live image - an upgrade, or a mode change - retire it
+    # here rather than let it re-disable Windows Update behind the user's back.
+    $mode = Get-WindowsUpdateMode
+    if ($mode -ne 'removed') {
+        Write-Log "Windows Update guard: image mode is '$mode', so there is nothing to re-assert - removing the task"
+        Remove-WindowsUpdateGuardTask
+        return
+    }
+
     $stateFile = Join-Path $GamingDir '.wu-guard-state'
     $runs = 0
     if (Test-Path -LiteralPath $stateFile) {
@@ -983,17 +1079,32 @@ try {
     Invoke-EssentialsFirstBoot -ConfigPath $essentialsConfig
 
     # Runs after the essentials pass and before anything else: this is the first
-    # payload that executes after the boot-time servicing pass that re-enables the
-    # Windows Update stack, so it is the only place the lockdown can be re-asserted
-    # before a scan gets a chance to run.
-    Write-Section 'Windows Update lockdown'
-    Restore-WindowsUpdateLockdown
-    try {
-        Register-WindowsUpdateGuard
-    } catch {
-        # Not fatal: the lockdown above is already applied. A missing guard means the
-        # state is only as good as this boot, which is worth a warning, not an abort.
-        Write-Log "could not register the Windows Update guard task ($_)" 'WARN'
+    # payload that executes after the boot-time servicing pass, so it is the only place
+    # the Windows Update state can be settled before a scan gets a chance to run.
+    #
+    # Three modes, three different jobs. 'paused' re-asserts the pause window and drops
+    # any guard left over from a removed image. 'removed' keeps the original lockdown
+    # plus its permanent guard. 'live' does nothing at all, which is the whole point.
+    $wuMode = Get-WindowsUpdateMode
+    Write-Section "Windows Update ($wuMode)"
+    switch ($wuMode) {
+        'paused' {
+            Restore-WindowsUpdatePause
+            Remove-WindowsUpdateGuardTask
+        }
+        'removed' {
+            Restore-WindowsUpdateLockdown
+            try {
+                Register-WindowsUpdateGuard
+            } catch {
+                # Not fatal: the lockdown above is already applied. A missing guard means the
+                # state is only as good as this boot, which is worth a warning, not an abort.
+                Write-Log "could not register the Windows Update guard task ($_)" 'WARN'
+            }
+        }
+        default {
+            Write-Log "Windows Update is live - the update stack is left exactly as Windows ships it"
+        }
     }
 
     if (Test-GroupEnabled 'atlas_power_scheme') {

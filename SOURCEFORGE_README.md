@@ -48,8 +48,7 @@ Each folder contains:
 - Ultra-minimal Windows 11 image
 - Complete removal of Microsoft Edge WebView2 footprints (Program Files and WinSxS assemblies)
 - Aggressive WinSxS removal
-- Windows Update binaries removed (~300 MB saved)
-- No Windows Updates possible (NON-SERVICEABLE)
+- Windows Update stack kept intact and paused until 3000 (toggle `pause_windows_update`)
 - WinRE (Recovery Environment) removed by default — preservable via build flag for real-hardware installs
 - Designed for VMs and testing only
 - **NOT suitable for daily use**
@@ -59,7 +58,7 @@ Each folder contains:
 - EXTREME minimal Windows 11 image
 - Complete removal of Microsoft Edge WebView2 footprints (Program Files and WinSxS assemblies)
 - Removes drivers, fonts, services, apps
-- Windows Update binaries removed (~300 MB saved)
+- Windows Update paused until 3000; uncheck `pause_windows_update` for stock behaviour
 - No printing, no Notepad/Paint
 - WinRE (Recovery Environment) removed by default — preservable via build flag for real-hardware installs
 - **FOR VM TESTING ONLY**

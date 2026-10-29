@@ -158,6 +158,31 @@ foreach ($svc in $revert.serviceRestore) {
     }
 }
 
+#---------[ Windows Update pause ]---------#
+
+# Clearing these is the entire undo for a paused image. The stack was never touched, so
+# there is no service to re-enable and no task folder to restore - which is the whole
+# reason pause replaced removal. A removed image cannot be recovered this way; the
+# manifest says so in its irreversible list.
+Write-Log ""
+Write-Log "Checking for a Windows Update pause..."
+
+$wuSettings = 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+$pausedUntil = (Get-ItemProperty -Path $wuSettings -Name 'PauseUpdatesExpiryTime' -ErrorAction SilentlyContinue).PauseUpdatesExpiryTime
+if ($pausedUntil) {
+    foreach ($name in @(
+        'PauseUpdatesStartTime', 'PauseUpdatesExpiryTime',
+        'PauseFeatureUpdatesStartTime', 'PauseFeatureUpdatesEndTime',
+        'PauseQualityUpdatesStartTime', 'PauseQualityUpdatesEndTime'
+    )) {
+        Remove-ItemProperty -Path $wuSettings -Name $name -ErrorAction SilentlyContinue
+    }
+    Write-Log "  cleared the pause that ran to $pausedUntil"
+    Write-Log "  Windows Update will scan again on its next scheduled pass"
+} else {
+    Write-Log "  no pause is set - nothing to do"
+}
+
 #---------[ Power plan ]---------#
 
 if (-not $KeepPowerPlan) {

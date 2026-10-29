@@ -507,7 +507,8 @@ function New-GamingManifest {
         $Profile,
         [hashtable]$Groups,
         [string]$Destination,
-        [string]$HagsMode = 'on'
+        [string]$HagsMode = 'on',
+        [string]$WindowsUpdateMode = 'paused'
     )
 
     $lines = @()
@@ -531,6 +532,26 @@ function New-GamingManifest {
     }
     $lines += ""
     $lines += "HAGS (Hardware Accelerated GPU Scheduling): **$HagsMode**"
+    $lines += ""
+    $lines += "Windows Update: **$WindowsUpdateMode**"
+    switch ($WindowsUpdateMode) {
+        'paused' {
+            $lines += ""
+            $lines += "The update stack is intact and paused until 3000-01-01. Resume it from"
+            $lines += "Settings > Windows Update, or run the revert script. On a Core image the"
+            $lines += "component store is minimised, so a resumed update will most likely fail -"
+            $lines += "pausing is about keeping the machine quiet, not about updating later."
+        }
+        'removed' {
+            $lines += ""
+            $lines += "The update stack is disabled and its client binaries are gone. This is"
+            $lines += "irreversible without reinstalling Windows."
+        }
+        'live' {
+            $lines += ""
+            $lines += "Windows Update is untouched and will behave like a stock Windows 11 install."
+        }
+    }
     $lines += ""
 
     $lines += "## Registry values written"
@@ -600,7 +621,9 @@ function New-GamingFirstBootPayload {
         [hashtable]$Groups,
         [string]$ScratchDir,
         [string]$ScriptRoot,
-        [string]$HagsMode = 'on'
+        [string]$HagsMode = 'on',
+        [ValidateSet('paused', 'live', 'removed')]
+        [string]$WindowsUpdateMode = 'paused'
     )
 
     $gamingDir = Join-Path $ScratchDir 'Windows\Tiny11Gaming'
@@ -640,18 +663,25 @@ function New-GamingFirstBootPayload {
     }
 
     # Group flags consumed by gaming-firstboot.ps1 on the target machine.
+    #
+    # windowsUpdateMode travels with them because the first-boot payload has to know
+    # which of three completely different jobs to do - re-assert a pause, re-assert a
+    # removal, or nothing at all - and it cannot infer that from the image, whose
+    # services look identical in paused and live mode.
     $groupsFile = [ordered]@{
-        profile     = $Profile.profile
-        hagsMode    = $HagsMode
-        generatedAt = (Get-Date -Format 'o')
-        groups      = $Groups
+        profile           = $Profile.profile
+        hagsMode          = $HagsMode
+        windowsUpdateMode = $WindowsUpdateMode
+        generatedAt       = (Get-Date -Format 'o')
+        groups            = $Groups
     }
     $groupsFile | ConvertTo-Json -Depth 4 | Out-File -FilePath (Join-Path $gamingDir 'gaming_groups.json') -Encoding UTF8 -Force
-    Write-GamingLog "  staged gaming_groups.json"
+    Write-GamingLog "  staged gaming_groups.json (windowsUpdateMode=$WindowsUpdateMode)"
 
     # Audit manifest.
     New-GamingManifest -Profile $Profile -Groups $Groups `
-        -Destination (Join-Path $gamingDir 'GAMING_PROFILE.md') -HagsMode $HagsMode
+        -Destination (Join-Path $gamingDir 'GAMING_PROFILE.md') -HagsMode $HagsMode `
+        -WindowsUpdateMode $WindowsUpdateMode
 
     # SetupComplete.cmd runs once as SYSTEM after setup finishes and before the first
     # logon. It is the only offline-injectable hook that is guaranteed to be elevated,
@@ -685,19 +715,21 @@ function Write-GamingBuildInfo {
         [hashtable]$Groups,
         [string]$OutputPath,
         [string]$HagsMode = 'on',
-        [string]$WindowsBuild
+        [string]$WindowsBuild,
+        [string]$WindowsUpdateMode = 'paused'
     )
 
     try {
         $info = [ordered]@{
-            gaming_profile    = $Profile.profile
-            profile_title     = $Profile.title
-            schema_version    = $Profile.schemaVersion
-            hags_mode         = $HagsMode
-            windows_build     = $WindowsBuild
-            generated_at      = (Get-Date -Format 'o')
-            groups            = $Groups
-            counts            = $script:GamingStats
+            gaming_profile      = $Profile.profile
+            profile_title       = $Profile.title
+            schema_version      = $Profile.schemaVersion
+            hags_mode           = $HagsMode
+            windows_update_mode = $WindowsUpdateMode
+            windows_build       = $WindowsBuild
+            generated_at        = (Get-Date -Format 'o')
+            groups              = $Groups
+            counts              = $script:GamingStats
         }
         $info | ConvertTo-Json -Depth 5 | Out-File -FilePath $OutputPath -Encoding UTF8 -Force
         Write-GamingLog "Gaming build info written to $OutputPath"

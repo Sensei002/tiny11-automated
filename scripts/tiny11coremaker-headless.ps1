@@ -53,20 +53,23 @@
     group with -GamingGroups. See GAMING.md for the full list and the risks.
 
     On top of the profile, a Core-Gaming build ALWAYS removes Windows Defender /
-    Security and the whole Windows Update stack (service, Update Medic, Update
-    Orchestrator and the Settings page). A Core image is non-serviceable, so both
-    are pure overhead on a latency-first build, and a disabled-but-present Defender
-    is what makes Security Center nag. This is not group-controlled and cannot be
-    turned off with -GamingGroups - build a plain Core image if you want either
-    kept.
+    Security, because a disabled-but-present Defender is what makes Security Center
+    nag. That is not group-controlled and cannot be turned off with -GamingGroups -
+    build a plain Core image if you want it kept.
+
+    Windows Update is handled by -WindowsUpdateMode and applies to every Core build,
+    not just Core-Gaming. The default is 'paused': the whole update stack stays
+    installed and a pause window is written that expires in the year 3000. 'live'
+    leaves Windows Update exactly as Microsoft ships it, and 'removed' is the old
+    non-serviceable behaviour. See GAMING.md.
 
     A Core-Gaming build also ALWAYS applies the essentials pass defined in
     config/essentials_profile.json - the post-install debloat list (activity
     history, BitLocker auto-encryption, delivery optimization, location, telemetry,
     WPBT, OneDrive, Windows AI, the right-click/Start menu layouts, and a long list
-    of services moved to manual or disabled). Like the Defender and Windows Update
-    removals it has no group flag and no workflow input: it is part of what
-    Core-Gaming means. See the Essentials section of GAMING.md.
+    of services moved to manual or disabled). Like the Defender removal it has no
+    group flag and no workflow input: it is part of what Core-Gaming means. See the
+    Essentials section of GAMING.md.
 
 .PARAMETER GamingProfileFile
     Path to the gaming profile JSON (optional). Defaults to
@@ -81,6 +84,23 @@
     Hardware Accelerated GPU Scheduling: 'on' (default) forces it on, 'off' forces
     it off, 'leave' keeps the Core default untouched. AtlasOS treats HAGS as
     system-dependent, so it is a toggle here rather than a fixed choice.
+
+.PARAMETER WindowsUpdateMode
+    What the finished image does about Windows Update.
+
+    'paused' (default) keeps wuauserv, UsoSvc, WaaSMedicSvc, their task folders and
+    the client binaries exactly as Microsoft ships them, and writes the pause window
+    into SOFTWARE\Microsoft\WindowsUpdate\UX\Settings with FlightSettingsMaxPauseDays
+    raised so the client cannot clamp it back to 35 days. A paused device is a
+    supported state, so nothing tries to repair it - which is why this needs no
+    boot guard, unlike removal.
+
+    'live' writes nothing at all.
+
+    'removed' disables the three services, deletes the client binaries, strips the
+    scheduling tasks and hides the Settings page. Irreversible without reinstalling,
+    and Core-Gaming only: that variant is the one that ships a first-boot payload to
+    re-assert it on the target.
 
 .EXAMPLE
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1
@@ -148,7 +168,7 @@ param (
     [ValidateSet('auto-admin', 'classic')]
     [string]$AccountSetup = 'auto-admin',
 
-    [Parameter(Mandatory=$false, HelpMessage="Apply the Tiny11 Core-Gaming profile: AtlasOS-style power scheme, latency-first tweaks, security mitigations off. Layers on top of the Core performance profile. Also always removes Windows Defender / Security and the entire Windows Update stack. See GAMING.md.")]
+    [Parameter(Mandatory=$false, HelpMessage="Apply the Tiny11 Core-Gaming profile: AtlasOS-style power scheme, latency-first tweaks, security mitigations off. Layers on top of the Core performance profile. Also always removes Windows Defender / Security. Windows Update is controlled by -WindowsUpdateMode. See GAMING.md.")]
     [switch]$GamingProfile,
 
     [Parameter(Mandatory=$false, HelpMessage="Path to the gaming profile JSON. Defaults to config/gaming_profile.json in the repository root.")]
@@ -159,7 +179,11 @@ param (
 
     [Parameter(Mandatory=$false, HelpMessage="Hardware Accelerated GPU Scheduling: 'on' forces it on, 'off' forces it off, 'leave' keeps the Core default.")]
     [ValidateSet('on', 'off', 'leave')]
-    [string]$HagsMode = 'on'
+    [string]$HagsMode = 'on',
+
+    [Parameter(Mandatory=$false, HelpMessage="What the finished image does about Windows Update. 'paused' (default) keeps the entire update stack intact and writes a pause window that expires in the year 3000; 'live' leaves Windows Update exactly as Microsoft ships it; 'removed' disables the services, deletes the client binaries and strips the scheduling tasks, which makes the image non-serviceable. See GAMING.md.")]
+    [ValidateSet('paused', 'live', 'removed')]
+    [string]$WindowsUpdateMode = 'paused'
 )
 
 #---------[ Error Handling ]---------
@@ -931,6 +955,53 @@ function Remove-WindowsUpdateStack {
     Write-Log "Windows Update stack removal finished"
 }
 
+#---------[ Windows Update: pause window ]---------#
+
+# The pause target. Kept as one constant so the builder, the assertion below and the
+# first-boot re-assert in gaming-firstboot.ps1 cannot drift apart - a mismatch there
+# would ship a window that looks paused and is not.
+$script:WindowsUpdatePauseExpiry = '3000-01-01T00:00:00Z'
+
+function Set-WindowsUpdatePause {
+    # -WindowsUpdateMode paused. Keeps the entire update stack present and tells the
+    # client to stop installing, instead of removing the stack.
+    #
+    # Why pause beats removal: removal is an unsupported state, so Windows actively
+    # repairs it. WaaSMedicSvc, its PerformRemediation task and the boot servicing pass
+    # all exist to put a disabled wuauserv back. That is why a removed stack kept
+    # coming back, and why it needed a permanent per-boot guard to chase it. Pause is a
+    # supported state, so nothing fights it, and clearing these values is a complete
+    # undo instead of a reinstall.
+    #
+    # FlightSettingsMaxPauseDays is the value that decides whether any of this holds.
+    # The window is enforced by the client and clamped to the 35-day Settings maximum
+    # unless that DWORD is raised, and a clamped window looks identical in Settings
+    # while the client keeps scanning. 2026 -> 3000 is ~355,700 days, so the cap is set
+    # to 10,000 years: deliberately far past the target, because the clamp is silent.
+    #
+    # Nothing here disables a service, deletes a binary or hides the Settings page. A
+    # paused device is supposed to keep a working Windows Update page that says so.
+    param([string]$HiveRoot = 'HKLM\zSOFTWARE')
+
+    $settings = "$HiveRoot\Microsoft\WindowsUpdate\UX\Settings"
+    $start = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $end = $script:WindowsUpdatePauseExpiry
+
+    Set-RegistryValue $settings 'FlightSettingsMaxPauseDays' 'REG_DWORD' '3650000'
+    Set-RegistryValue $settings 'PauseUpdatesStartTime' 'REG_SZ' $start
+    Set-RegistryValue $settings 'PauseUpdatesExpiryTime' 'REG_SZ' $end
+    Set-RegistryValue $settings 'PauseFeatureUpdatesStartTime' 'REG_SZ' $start
+    Set-RegistryValue $settings 'PauseFeatureUpdatesEndTime' 'REG_SZ' $end
+    Set-RegistryValue $settings 'PauseQualityUpdatesStartTime' 'REG_SZ' $start
+    Set-RegistryValue $settings 'PauseQualityUpdatesEndTime' 'REG_SZ' $end
+
+    # Drivers are not covered by the quality-update pause in every configuration, so
+    # this stays written as its own switch rather than relying on the window above.
+    Set-RegistryValue "$HiveRoot\Policies\Microsoft\Windows\WindowsUpdate" 'ExcludeWUDriversInQualityUpdate' 'REG_DWORD' '1'
+
+    Write-Log "Windows Update paused until $end (FlightSettingsMaxPauseDays=3650000)" "SUCCESS"
+}
+
 function Remove-EdgeAndOneDrive {
     Write-Log "Removing Microsoft Edge and Edge WebView..."
 
@@ -977,14 +1048,22 @@ function Remove-EdgeAndOneDrive {
         }
     }
 
-    # Windows Update binaries (NON-SERVICEABLE BUILD)
-    Write-Log "Removing Windows Update binaries (this is a non-serviceable build)..."
-    Remove-Item -Path "$scratchDir\Windows\System32\usoclient.exe" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$scratchDir\Windows\System32\UsoApiAll.dll" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$scratchDir\Windows\System32\UsoApi.dll" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$scratchDir\Windows\System32\UpdatePolicy.dll" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$scratchDir\Windows\System32\drivers\umbus.sys" -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path "$scratchDir\Windows\SoftwareDistribution" -Recurse -Force -ErrorAction SilentlyContinue
+    # Windows Update binaries. Only in 'removed' mode.
+    #
+    # This used to be unconditional, which is why every Core image shipped
+    # non-serviceable whether the person building it wanted that or not. Under the
+    # 'paused' default these files stay: the pause is enforced by the client reading
+    # UX\Settings, so deleting the client cannot help and can only make the Settings
+    # page fail instead of showing a paused state.
+    if ($WindowsUpdateMode -eq 'removed') {
+        Write-Log "Removing Windows Update binaries (this is a non-serviceable build)..."
+        Remove-Item -Path "$scratchDir\Windows\System32\usoclient.exe" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$scratchDir\Windows\System32\UsoApiAll.dll" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$scratchDir\Windows\System32\UsoApi.dll" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$scratchDir\Windows\System32\UpdatePolicy.dll" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$scratchDir\Windows\System32\drivers\umbus.sys" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$scratchDir\Windows\SoftwareDistribution" -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     Write-Log "Edge and OneDrive removal complete"
     
@@ -1477,34 +1556,41 @@ function Apply-RegistryTweaks {
     # Prevent new Outlook installation
     Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Mail' 'PreventRun' 'REG_DWORD' '1'
 
-    # Disable Windows Update
+    # Windows Update, by mode.
     #
-    # Disable, never delete. Deleting an inbox service key does not survive: the
-    # servicing stack restores missing inbox service registrations on the first
-    # online boot, which is exactly the "connects to the internet, reboots twice,
-    # Windows Update is back" behaviour. Start=4 on a key that still exists is what
-    # actually holds.
+    # 'removed' is the pre-2026-10 behaviour: disable, never delete. Deleting an inbox
+    # service key does not survive - the servicing stack restores missing inbox service
+    # registrations on the first online boot, which is exactly the "connects to the
+    # internet, reboots twice, Windows Update is back" behaviour. Start=4 on a key that
+    # still exists is what actually holds.
     #
-    # WaaSMedicSvc (Windows Update Medic) exists to notice that wuauserv is
-    # disabled and put it back, so it has to be disabled too. Its remediation task
-    # lives in Windows\System32\Tasks\Microsoft\Windows\WaaSMedic and is removed by
+    # WaaSMedicSvc (Windows Update Medic) exists to notice that wuauserv is disabled and
+    # put it back, so it has to be disabled too. Its remediation task lives in
+    # Windows\System32\Tasks\Microsoft\Windows\WaaSMedic and is removed by
     # Remove-ScheduledTasks; the service alone is not enough.
-    foreach ($wuService in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
-        Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$wuService" 'Start' 'REG_DWORD' '4'
+    #
+    # 'paused' and 'live' leave the services and their task folders completely alone.
+    # That is the whole point of the pause: a supported state needs no repair, so
+    # nothing re-enables it behind your back and nothing needs a guard to chase it.
+    if ($WindowsUpdateMode -eq 'removed') {
+        foreach ($wuService in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
+            Set-RegistryValue "HKLM\zSYSTEM\ControlSet001\Services\$wuService" 'Start' 'REG_DWORD' '4'
+        }
+
+        # Policy layer.
+        #
+        # There is deliberately NO WUServer / WUStatusServer / UseWUServer redirect.
+        # Pointing the client at http://localhost made the Settings app fail its
+        # Windows Update COM query, which is what rendered "An error occurred" instead
+        # of a managed state. The access policies below close the same door without
+        # breaking the page.
+        Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DoNotConnectToWindowsUpdateInternetLocations' 'REG_DWORD' '1'
+        Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess' 'REG_DWORD' '1'
+        Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'SetDisableUXWUAccess' 'REG_DWORD' '1'
+        Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'ExcludeWUDriversInQualityUpdate' 'REG_DWORD' '1'
+        Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
     }
 
-    # Policy layer.
-    #
-    # There is deliberately NO WUServer / WUStatusServer / UseWUServer redirect.
-    # Pointing the client at http://localhost made the Settings app fail its
-    # Windows Update COM query, which is what rendered "An error occurred" instead
-    # of a managed state. The access policies below close the same door without
-    # breaking the page.
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DoNotConnectToWindowsUpdateInternetLocations' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'DisableWindowsUpdateAccess' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'SetDisableUXWUAccess' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' 'ExcludeWUDriversInQualityUpdate' 'REG_DWORD' '1'
-    Set-RegistryValue 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' 'NoAutoUpdate' 'REG_DWORD' '1'
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' 'DisableOnline' 'REG_DWORD' '1'
 
     # Disable Windows Defender
@@ -1522,16 +1608,22 @@ function Apply-RegistryTweaks {
     # from rewriting the recovery partition on hardware whose layout the user owns.
     Set-RegistryValue 'HKLM\zSYSTEM\ControlSet001\Control\WinRE' 'WinREEnabled' 'REG_DWORD' '0'
 
-    # Hide both Settings pages. This is the ONLY write site for
-    # SettingsPageVisibility in this script: a Core-Gaming build inherits it
-    # rather than writing its own copy, so the shipped value cannot depend on
-    # the order the two code paths happen to run in.
+    # Hide the Settings pages. This is the ONLY write site for SettingsPageVisibility
+    # in this script: a Core-Gaming build inherits it rather than writing its own copy,
+    # so the shipped value cannot depend on the order the two code paths happen to run
+    # in.
     #
-    # Page ids are the ms-settings URI minus the 'ms-settings:' prefix. The
-    # Windows Security page is 'windowsdefender'. The value here used to read
-    # 'hide:virus;windowsupdate' - 'virus' is not a Windows 11 page id at all,
-    # so it hid nothing.
-    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' 'hide:windowsupdate;windowsdefender'
+    # Page ids are the ms-settings URI minus the 'ms-settings:' prefix. The Windows
+    # Security page is 'windowsdefender'. The value here used to read
+    # 'hide:virus;windowsupdate' - 'virus' is not a Windows 11 page id at all, so it
+    # hid nothing.
+    #
+    # The Windows Update page is only hidden when the stack is actually removed. Under
+    # 'paused' the page is the only place the pause is visible and the only way back,
+    # so hiding it would turn a reversible, honest state into a mystery.
+    $hiddenPages = 'windowsdefender'
+    if ($WindowsUpdateMode -eq 'removed') { $hiddenPages = 'windowsupdate;windowsdefender' }
+    Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer' 'SettingsPageVisibility' 'REG_SZ' "hide:$hiddenPages"
 
     # Easter Egg / Branding
     Write-Log "Adding Easter Egg branding..."
@@ -1556,18 +1648,27 @@ function Remove-ScheduledTasks {
         "$tasksPath\Microsoft\Windows\Customer Experience Improvement Program",
         "$tasksPath\Microsoft\Windows\Application Experience\ProgramDataUpdater",
         "$tasksPath\Microsoft\Windows\Chkdsk\Proxy",
-        "$tasksPath\Microsoft\Windows\Windows Error Reporting\QueueReporting",
-        # Windows Update scheduling layer. WaaSMedic is the important one: its
-        # PerformRemediation task re-enables wuauserv after a reboot or two even
-        # when the service is set to Start=4, which is what makes Windows Update
-        # reappear on a connected machine. UpdateOrchestrator and InstallService
-        # are the boot-time servicing pass, and WindowsUpdate schedules the
-        # scan itself.
-        "$tasksPath\Microsoft\Windows\WaaSMedic",
-        "$tasksPath\Microsoft\Windows\UpdateOrchestrator",
-        "$tasksPath\Microsoft\Windows\WindowsUpdate",
-        "$tasksPath\Microsoft\Windows\InstallService"
+        "$tasksPath\Microsoft\Windows\Windows Error Reporting\QueueReporting"
     )
+
+    # Windows Update scheduling layer, only when the stack is actually removed.
+    #
+    # WaaSMedic is the important one: its PerformRemediation task re-enables wuauserv
+    # after a reboot or two even when the service is set to Start=4, which is what
+    # makes Windows Update reappear on a connected machine. UpdateOrchestrator and
+    # InstallService are the boot-time servicing pass, and WindowsUpdate schedules the
+    # scan itself.
+    #
+    # Under 'paused' these folders have to stay: WaaSMedic does not touch a paused
+    # device, and the orchestrator is what reads the pause window in the first place.
+    if ($WindowsUpdateMode -eq 'removed') {
+        $tasksToRemove += @(
+            "$tasksPath\Microsoft\Windows\WaaSMedic",
+            "$tasksPath\Microsoft\Windows\UpdateOrchestrator",
+            "$tasksPath\Microsoft\Windows\WindowsUpdate",
+            "$tasksPath\Microsoft\Windows\InstallService"
+        )
+    }
 
     foreach ($task in $tasksToRemove) {
         if (Test-Path $task) {
@@ -1899,53 +2000,114 @@ function Assert-InstallImageRecoveryConsistent {
     }
 }
 
-function Assert-WindowsUpdateLockdown {
-    # -GamingProfile only. Fails the build unless the mounted image actually carries
-    # the Windows Update lockdown.
+function Get-OfflineRegistryValue {
+    # StrictMode-safe read from a loaded offline hive. Returns $null when the key or
+    # the value is absent, which is a normal answer here rather than an error.
+    param([string]$KeyPath, [string]$Name)
+    try {
+        $item = Get-ItemProperty -Path $KeyPath -Name $Name -ErrorAction Stop
+        return $item.$Name
+    } catch {
+        return $null
+    }
+}
+
+function Assert-WindowsUpdateState {
+    # Fails the build unless the mounted image actually carries the requested Windows
+    # Update state.
     #
-    # Every write in the removal passes is best-effort against a hive and a task tree
-    # that Windows treats as system-owned: Remove-Item runs with
-    # -ErrorAction SilentlyContinue and a registry write can be denied, so a build
-    # that removed nothing logs exactly like a build that removed everything. A
-    # shipped Core-Gaming image was found with wuauserv back at Start=3 and
-    # InstallService\ScanForUpdates still registered, and there was no line anywhere
-    # in the build log to suggest a pass had failed.
+    # Every write in these passes is best-effort against a hive and a task tree that
+    # Windows treats as system-owned: Remove-Item runs with -ErrorAction
+    # SilentlyContinue and a registry write can be denied, so a build that changed
+    # nothing logs exactly like a build that changed everything. A shipped Core-Gaming
+    # image was found with wuauserv back at Start=3 and InstallService\ScanForUpdates
+    # still registered, and there was no line anywhere in the build log to suggest a
+    # pass had failed.
     #
     # So read the state back instead of trusting the passes. This runs after every
     # service and task pass, which is the last moment the hives are loaded and the
     # state is still authoritative.
     #
-    # Failing here is the point. A build that cannot remove the task folders needs
-    # the ownership/ACL problem fixed, not a warning that scrolls past in CI.
-    param([Parameter(Mandatory = $true)][string]$MountDir)
+    # Failing here is the point. A build that cannot reach the requested state needs
+    # the underlying problem fixed, not a warning that scrolls past in CI.
+    param(
+        [Parameter(Mandatory = $true)][string]$MountDir,
+        [ValidateSet('paused', 'live', 'removed')][string]$Mode = 'paused'
+    )
 
-    Write-Log "Verifying the Windows Update lockdown in the mounted image"
+    Write-Log "Verifying the Windows Update state in the mounted image (mode: $Mode)"
 
     $bad = @()
+
+    # Service start types are the one thing every mode has an opinion about, in
+    # opposite directions: 'removed' requires Start=4, the other two forbid it.
     foreach ($svc in @('wuauserv', 'UsoSvc', 'WaaSMedicSvc')) {
         $key = "HKLM:\zSYSTEM\ControlSet001\Services\$svc"
         if (-not (Test-Path $key)) {
             $bad += "$svc service key missing"
             continue
         }
-        $start = (Get-ItemProperty -Path $key -Name 'Start' -ErrorAction SilentlyContinue).Start
-        if ($start -ne 4) { $bad += "$svc Start=$start (expected 4)" }
+        $start = Get-OfflineRegistryValue -KeyPath $key -Name 'Start'
+        if ($Mode -eq 'removed') {
+            if ($start -ne 4) { $bad += "$svc Start=$start (expected 4)" }
+        } elseif ($start -eq 4) {
+            $bad += "$svc Start=4, which is the removal mode, not '$Mode'"
+        }
     }
 
-    $taskRoot = Join-Path $MountDir 'Windows\System32\Tasks\Microsoft\Windows'
-    foreach ($folder in @('WaaSMedic', 'UpdateOrchestrator', 'WindowsUpdate', 'InstallService')) {
-        if (Test-Path -LiteralPath (Join-Path $taskRoot $folder)) {
-            $bad += "task folder survives: $folder"
+    if ($Mode -eq 'removed') {
+        $taskRoot = Join-Path $MountDir 'Windows\System32\Tasks\Microsoft\Windows'
+        foreach ($folder in @('WaaSMedic', 'UpdateOrchestrator', 'WindowsUpdate', 'InstallService')) {
+            if (Test-Path -LiteralPath (Join-Path $taskRoot $folder)) {
+                $bad += "task folder survives: $folder"
+            }
+        }
+    } else {
+        # The client binary is the cheapest proof that the removal pass did not run
+        # behind the mode's back. Checking the task folders instead would fail on media
+        # where Microsoft simply ships fewer of them, which is not our state to assert.
+        $client = Join-Path $MountDir 'Windows\System32\usoclient.exe'
+        if (-not (Test-Path -LiteralPath $client)) {
+            $bad += 'usoclient.exe is missing (the removal pass ran, or this media does not ship it)'
+        }
+    }
+
+    $settings = 'HKLM:\zSOFTWARE\Microsoft\WindowsUpdate\UX\Settings'
+    if ($Mode -eq 'paused') {
+        $expiry = Get-OfflineRegistryValue -KeyPath $settings -Name 'PauseUpdatesExpiryTime'
+        if (-not $expiry) {
+            $bad += 'PauseUpdatesExpiryTime is missing'
+        } elseif ("$expiry" -notmatch '^3000-') {
+            $bad += "PauseUpdatesExpiryTime=$expiry (expected a year-3000 expiry)"
+        }
+
+        # A pause whose cap is below the window length is clamped back to 35 days by
+        # the client and silently expires, so the cap is part of the assertion.
+        $maxDays = Get-OfflineRegistryValue -KeyPath $settings -Name 'FlightSettingsMaxPauseDays'
+        if ($null -eq $maxDays) {
+            $bad += 'FlightSettingsMaxPauseDays is missing - the pause would be clamped to 35 days'
+        } elseif ([int]$maxDays -lt 400000) {
+            $bad += "FlightSettingsMaxPauseDays=$maxDays (too small for a year-3000 window)"
+        }
+
+        foreach ($name in @('PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime')) {
+            $value = Get-OfflineRegistryValue -KeyPath $settings -Name $name
+            if ("$value" -notmatch '^3000-') { $bad += "$name=$value (expected a year-3000 expiry)" }
+        }
+    } elseif ($Mode -eq 'live') {
+        foreach ($name in @('PauseUpdatesExpiryTime', 'PauseFeatureUpdatesEndTime', 'PauseQualityUpdatesEndTime')) {
+            $value = Get-OfflineRegistryValue -KeyPath $settings -Name $name
+            if ($value) { $bad += "$name is set, but mode is live" }
         }
     }
 
     if ($bad.Count -gt 0) {
-        throw ("Windows Update lockdown did not land in the image: " + ($bad -join '; ') +
-            ". This ISO would ship with Windows Update still able to scan. Refusing to build it - " +
-            "check the removal passes for a denied registry write or a task folder that could not be deleted.")
+        throw ("Windows Update state did not land in the image (mode: $Mode): " + ($bad -join '; ') +
+            ". This ISO would not behave the way the build asked for. Refusing to build it - " +
+            "check the passes for a denied registry write, or for a removal pass running in a non-removal mode.")
     }
 
-    Write-Log "Windows Update lockdown verified: 3 services at Start=4, 4 task folders absent" "SUCCESS"
+    Write-Log "Windows Update state verified for mode '$Mode'" "SUCCESS"
 }
 
 function Create-TinyISO {
@@ -2237,9 +2399,10 @@ try {
         Remove-DefenderPayload
     }
 
-    # Gaming profile: complete Windows Update removal. Payload half, so it runs
-    # while the hives are still unloaded.
-    if ($GamingProfile) {
+    # Windows Update removal, payload half - only in 'removed' mode, and only for a
+    # Core-Gaming build, which is the variant that has a first-boot payload to re-assert
+    # it. Runs while the hives are still unloaded.
+    if ($GamingProfile -and $WindowsUpdateMode -eq 'removed') {
         Remove-WindowsUpdatePayload
     }
 
@@ -2281,10 +2444,18 @@ try {
         Invoke-EssentialsRegistryTweaks -Profile $essentialsProfileData
     }
 
-    # Gaming profile: complete Windows Update removal. Registry half. Runs after
-    # Apply-RegistryTweaks so it wins over the always-on Core WU policies.
-    if ($GamingProfile) {
+    # Windows Update, registry half. Runs after Apply-RegistryTweaks so it wins over
+    # the Core defaults written there.
+    #
+    # 'removed' keeps the old two-part removal and is still Core-Gaming only, because
+    # that variant ships the payload that re-asserts it on the target.
+    # 'paused' writes the pause window for every Core build: it is a handful of
+    # registry values, needs no first-boot work, and a plain Core image has no payload
+    # to carry it otherwise.
+    if ($GamingProfile -and $WindowsUpdateMode -eq 'removed') {
         Remove-WindowsUpdateStack
+    } elseif ($WindowsUpdateMode -eq 'paused') {
+        Set-WindowsUpdatePause
     }
 
     Apply-PerformanceTweaks
@@ -2307,12 +2478,13 @@ try {
         Invoke-GamingServiceTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
     }
 
-    # Gaming profile: read the lockdown back while the hives are still loaded and every
+    # Read the Windows Update state back while the hives are still loaded and every
     # service/task pass has run. Fails the build rather than shipping an ISO whose
-    # Windows Update removal silently did nothing.
-    if ($GamingProfile) {
-        Assert-WindowsUpdateLockdown -MountDir $scratchDir
-    }
+    # Windows Update handling silently did nothing.
+    #
+    # Runs for every Core build, not just Core-Gaming: since the pause is the default
+    # for all of them, an unverified pause is exactly as bad as an unverified removal.
+    Assert-WindowsUpdateState -MountDir $scratchDir -Mode $WindowsUpdateMode
 
     Unload-RegistryHives
 
@@ -2324,7 +2496,8 @@ try {
     # Only install.wim is touched - never boot.wim, which Ventoy inspects and patches.
     if ($GamingProfile) {
         New-GamingFirstBootPayload -Profile $gamingProfileData -Groups $gamingGroupFlags `
-            -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -HagsMode $HagsMode
+            -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -HagsMode $HagsMode `
+            -WindowsUpdateMode $WindowsUpdateMode
 
         # Essentials: stage its data next to the gaming payload, write the audit
         # manifest, and add the report script. gaming-firstboot.ps1 picks the JSON up
@@ -2367,7 +2540,8 @@ try {
     if ($GamingProfile) {
         Write-GamingBuildInfo -Profile $gamingProfileData -Groups $gamingGroupFlags `
             -OutputPath "$PSScriptRoot\tiny11core-gaming-buildinfo.json" `
-            -HagsMode $HagsMode -WindowsBuild $script:DetectedBuildNumber
+            -HagsMode $HagsMode -WindowsBuild $script:DetectedBuildNumber `
+            -WindowsUpdateMode $WindowsUpdateMode
     }
 
     # Cleanup

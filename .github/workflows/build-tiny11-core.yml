@@ -66,6 +66,11 @@ on:
           - 'required'
           - 'best-effort'
           - 'off'
+      pause_windows_update:
+        description: 'Keep the Windows Update stack installed but paused until the year 3000. Checked (default): nothing is removed, so Settings shows a real paused state - the machine stays quiet without Windows trying to repair a broken stack. Unchecked: Windows Update behaves exactly like a stock Windows 11 install.'
+        type: boolean
+        required: false
+        default: true
 
 env:
   ARIA2C_CONNECTIONS: '16'
@@ -432,6 +437,11 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($accountSetup)) { $accountSetup = 'auto-admin' }
           Write-Output "Account setup: $accountSetup"
 
+          # Paused is the default, so an unset input must mean paused rather than live.
+          $pauseUpdates = ("${{ github.event.inputs.pause_windows_update }}" -ne 'false')
+          $windowsUpdateMode = 'live'
+          if ($pauseUpdates) { $windowsUpdateMode = 'paused' }
+
           Write-Output "=== Starting Tiny11 Core Builder ==="
           Write-Output "ISO Drive: $($params.ISO)"
           Write-Output "Image Index: $($params.INDEX)"
@@ -439,12 +449,13 @@ jobs:
           Write-Output "Preserve WinRE: always (the builder no longer has a toggle)"
           Write-Output "Remove Defender: $removeDefender"
           Write-Output "Account setup: $accountSetup"
+          Write-Output "Windows Update mode: $windowsUpdateMode"
           Write-Output "Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
           Write-Output "WARNING: This is a CORE build with aggressive optimization!"
 
           $startTime = Get-Date
 
-          .\scripts\tiny11coremaker-headless.ps1 @params -ENABLE_DOTNET35:$enableDotNet -RemoveDefender:$removeDefender -AccountSetup $accountSetup
+          .\scripts\tiny11coremaker-headless.ps1 @params -ENABLE_DOTNET35:$enableDotNet -RemoveDefender:$removeDefender -AccountSetup $accountSetup -WindowsUpdateMode $windowsUpdateMode
 
           $buildTime = (Get-Date) - $startTime
           Write-Output "Core build completed in $($buildTime.TotalMinutes.ToString('F2')) minutes"

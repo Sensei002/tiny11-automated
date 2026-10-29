@@ -138,7 +138,7 @@
       "workflow": "build-tiny11-core.yml",
       "builder": "scripts/tiny11coremaker-headless.ps1",
       "outputIso": "tiny11-core.iso",
-      "description": "Strips the component store and the servicing stack down to the bone. Smallest footprint that still installs, but Windows Update is effectively gone. Not for daily use.",
+      "description": "Strips the component store and the servicing stack down to the bone. Smallest footprint that still installs. Windows Update ships intact but paused until 3000 unless you uncheck that. Not for daily use.",
       "inputs": [
         { "key": "windows_version", "label": "Windows version", "type": "text", "default": "26H2", "help": "Label only - the real build is read from the ISO." },
         { "key": "image_index", "label": "Edition", "type": "imageIndex", "default": "1" },
@@ -150,6 +150,7 @@
             { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
             { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
           ] },
+        { "key": "pause_windows_update", "label": "Pause Windows Update until 3000", "type": "bool", "default": true, "param": "WindowsUpdateMode", "paramType": "updateMode", "help": "Checked keeps the update stack installed but paused until the year 3000, so Settings shows a real paused state. Unchecked leaves Windows Update exactly as Microsoft ships it." },
         { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
       ],
       "paramMap": {
@@ -161,7 +162,8 @@
         "RequireLatestUpdate": "requireLatestUpdate:switch",
         "ENABLE_DOTNET35": "enable_dotnet35:switch",
         "RemoveDefender": "remove_defender:switch",
-        "AccountSetup": "account_setup:string"
+        "AccountSetup": "account_setup:string",
+        "WindowsUpdateMode": "pause_windows_update:updateMode"
       }
     },
 
@@ -172,7 +174,7 @@
       "workflow": "build-tiny11-core-gaming.yml",
       "builder": "scripts/tiny11coremaker-headless.ps1",
       "outputIso": "tiny11-core.iso",
-      "description": "Core plus the AtlasOS-style gaming profile: latency-first power plan, security mitigations off, Xbox stack removed. Always removes Defender and the Windows Update stack.",
+      "description": "Core plus the AtlasOS-style gaming profile: latency-first power plan, security mitigations off, Xbox stack removed. Always removes Defender. Windows Update ships intact but paused until 3000 unless you uncheck that.",
       "inputs": [
         { "key": "windows_version", "label": "Windows version", "type": "text", "default": "26H2", "help": "Label only - the real build is read from the ISO." },
         { "key": "image_index", "label": "Edition", "type": "imageIndex", "default": "1" },
@@ -190,6 +192,7 @@
             { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
           ] },
         { "key": "gaming_groups", "label": "Gaming tweaks", "type": "group", "param": "GamingGroups", "paramType": "hashtable", "composedFrom": "gamingGroups", "help": "Each toggle maps to a group in config/gaming_profile.json." },
+        { "key": "pause_windows_update", "label": "Pause Windows Update until 3000", "type": "bool", "default": true, "param": "WindowsUpdateMode", "paramType": "updateMode", "help": "Checked keeps the update stack installed but paused until the year 3000, so Settings shows a real paused state. Unchecked leaves Windows Update exactly as Microsoft ships it." },
         { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
       ],
       "paramMap": {
@@ -203,7 +206,8 @@
         "AccountSetup": "account_setup:string",
         "GamingProfile": "@static:switch",
         "GamingGroups": "gaming_groups:hashtable",
-        "HagsMode": "hags:string"
+        "HagsMode": "hags:string",
+        "WindowsUpdateMode": "pause_windows_update:updateMode"
       }
     },
 
@@ -285,6 +289,7 @@
             { "value": "auto-admin", "label": "Auto admin - skip OOBE, pre-create 'Admin'" },
             { "value": "classic", "label": "Classic - run OOBE and choose your own name" }
           ] },
+        { "key": "pause_windows_update", "label": "Pause Windows Update until 3000", "type": "bool", "default": true, "param": "WindowsUpdateMode", "paramType": "updateMode", "help": "Checked keeps the update stack installed but paused until the year 3000, so Settings shows a real paused state. Unchecked leaves Windows Update exactly as Microsoft ships it." },
         { "key": "skip_cleanup", "label": "Keep temporary files", "type": "bool", "default": false, "param": "SkipCleanup", "paramType": "switch", "help": "Debugging aid. Keeps the extracted image around after the build." }
       ],
       "paramMap": {
@@ -297,7 +302,8 @@
         "ENABLE_DOTNET35": "enable_dotnet35:switch",
         "RemoveDefender": "remove_defender:switch",
         "AccountSetup": "account_setup:string",
-        "ExpectedEdition": "ltsc_edition:string"
+        "ExpectedEdition": "ltsc_edition:string",
+        "WindowsUpdateMode": "pause_windows_update:updateMode"
       }
     }
   ]

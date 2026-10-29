@@ -32,6 +32,7 @@ EXPECTED_NAME = "Build and Release Tiny11 Core-Gaming"
 EXPECTED_JOB = "build-tiny11-core-gaming"
 
 CATALOG = REPO_ROOT / "scripts" / "ltsc-edition-catalog.ps1"
+GAMING_PROFILE = REPO_ROOT / "config" / "gaming_profile.json"
 BACKFILL_WF = WORKFLOWS / "upload-iso-to-sourceforge.yml"
 BUILD_WORKFLOWS = [
     "build-tiny11.yml",
@@ -70,6 +71,21 @@ def inputs_of(doc) -> set[str]:
     on_block = doc.get("on") or doc.get(True) or {}
     dispatch = on_block.get("workflow_dispatch") or {}
     return set(dispatch.get("inputs") or {})
+
+
+def gaming_group_names() -> set[str]:
+    """Group names the gaming profile declares.
+
+    These are the keys -GamingGroups accepts, and they are what the local builder's
+    composed "Gaming tweaks" control really maps onto. The Core-Gaming workflow used
+    to mirror all 14 as individual inputs; it collapsed them into one preset when it
+    hit GitHub's 25 workflow_dispatch input cap, so the profile file - not the YAML -
+    is the contract that control has to satisfy.
+    """
+    with open(GAMING_PROFILE, encoding="utf-8") as fh:
+        import json  # noqa: PLC0415
+        data = json.load(fh)
+    return set((data.get("defaultGroups") or {}).keys())
 
 
 def catalog_entries() -> list[dict[str, str]]:
@@ -482,16 +498,24 @@ def validate_local_build_profiles() -> None:
 
         wanted = set()
         composed = {}
+        profile_groups = gaming_group_names()
         for item in variant.get("inputs") or []:
             source = item.get("composedFrom")
             if source:
-                # One GUI control over several workflow inputs, e.g. the 14 gaming
-                # toggles. Each member still has to exist in the workflow.
+                # One GUI control over several builder groups, e.g. the 14 gaming
+                # toggles. They map onto -GamingGroups directly and never travel
+                # through the workflow, so the profile file is the thing to check.
                 members = {entry.get("value") for entry in profile.get(source) or []}
                 composed[item.get("key")] = members
-                wanted |= members
-            else:
-                wanted.add(item.get("key"))
+                unknown_groups = sorted(members - profile_groups)
+                if unknown_groups:
+                    problems.append(
+                        f"{vid} composes gaming group(s) the profile does not declare: "
+                        f"{', '.join(unknown_groups)}"
+                    )
+                    print(f"[FAIL] {vid}: unknown gaming group(s) {', '.join(unknown_groups)}")
+                continue
+            wanted.add(item.get("key"))
 
         unknown = sorted(wanted - declared)
         if unknown:

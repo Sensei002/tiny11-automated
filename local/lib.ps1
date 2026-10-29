@@ -131,6 +131,8 @@ function New-BuilderArguments {
           int       - cast, so INDEX is never handed over as '6'
           switch    - included only when true, so the launcher stays readable
           hashtable - passed as-is (the gaming groups)
+          updateMode - a checkbox the builder takes as a mode string: true -> 'paused',
+                       false -> 'live' (the Windows Update pause)
           @static   - always true; a switch the variant implies rather than asks about
 
         Omitted keys are the point: passing -SkipCleanup:$false everywhere would work
@@ -174,6 +176,16 @@ function New-BuilderArguments {
 
         if ($type -eq 'hashtable') {
             if ($value -and @($value.Keys).Count -gt 0) { $result[$paramName] = $value }
+            continue
+        }
+
+        if ($type -eq 'updateMode') {
+            # The form asks a yes/no question ("pause Windows Update?"), while the
+            # builder takes a mode. Mapping it here keeps the checkbox out of the
+            # builder's parameter surface and keeps one source of truth for the names.
+            $enabled = $false
+            if ($value -is [bool]) { $enabled = $value } else { $enabled = ("$value" -eq 'true') }
+            if ($enabled) { $result[$paramName] = 'paused' } else { $result[$paramName] = 'live' }
             continue
         }
 

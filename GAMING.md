@@ -44,7 +44,7 @@ skips that group entirely; it does not half-apply.
 
 ```powershell
 # Full Core-Gaming build for competitive esports
-# (Defender and the whole Windows Update stack are removed automatically)
+# (Defender is removed automatically; Windows Update ships paused until 3000)
 .\scripts\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -GamingProfile
 
 # Dial a few groups back
@@ -132,10 +132,10 @@ deliberately overrides six of its choices:
 | `useplatformtick` | `yes` (RunOnce) | **deleted** — it is slower than the invariant TSC |
 | Memory compression | on | **off** on machines with 16 GB or more |
 
-### Defender and Windows Update are removed, not disabled
+### Defender is removed; Windows Update is paused, not removed
 
-Core-Gaming always removes both. This is **not** a group toggle — `-GamingGroups` cannot
-turn it off. Build a plain Core image if you want either kept.
+Core-Gaming always removes Defender. This is **not** a group toggle — `-GamingGroups` cannot
+turn it off. Build a plain Core image if you want it kept.
 
 **Windows Defender / Security.** A plain Core build only *disables* the Defender services,
 which is worse than it sounds: Security Center notices antivirus is off and starts nagging
@@ -145,14 +145,71 @@ and deletes the `WinDefend` / `WdNisSvc` / `WdFilter` / `Sense` / `SecurityHealt
 service keys outright. `wscsvc` (Security Center) and the System Guard services are disabled
 rather than deleted, because they are shared Windows plumbing.
 
-**Windows Update.** Disabling `wuauserv` alone does not hold on modern Windows, and it is
+**Windows Update.** `-WindowsUpdateMode` decides, and it applies to **every** Core build —
+Core, Core LTSC and Core-Gaming — not only the gaming one. The workflow input is
+`pause_windows_update`, a checkbox.
+
+| Mode | Selected by | What the image does |
+|---|---|---|
+| `paused` (default) | `pause_windows_update` checked | Stack fully intact. A pause window is written that expires in the year 3000. Settings shows a real paused state. |
+| `live` | `pause_windows_update` unchecked | Nothing is written. Windows Update behaves like a stock Windows 11 install. |
+| `removed` | `-WindowsUpdateMode removed` on the builder, or the local GUI | Services disabled, client binaries deleted, scheduling tasks stripped, page hidden. Irreversible. |
+
+#### Why pause replaced removal as the default
+
+Removal is an **unsupported** state, so Windows actively repairs it. `WaaSMedicSvc` exists to
+notice a disabled Windows Update and put it back, `UsoSvc` runs the servicing pass at boot, and
+that pass re-registers inbox service start types from the component manifests. That is why
+removal needed a permanent guard firing ten times per boot — and why it still lost the race,
+with a shipped image observed booting with `wuauserv` back at `Start=3`.
+
+Pause is a **supported** state. A paused device is healthy, so nothing tries to repair it: no
+medic, no re-arm, no guard, no scheduled task. It can also be undone later by deleting six
+registry values instead of reinstalling Windows, which `Undo-GamingTweaks.ps1` does.
+
+#### The pause window
+
+Written to `HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings`:
+
+| Value | Written |
+|---|---|
+| `FlightSettingsMaxPauseDays` | `3650000` (days, i.e. 10,000 years) |
+| `PauseUpdatesStartTime` | build date |
+| `PauseUpdatesExpiryTime` | `3000-01-01T00:00:00Z` |
+| `PauseFeatureUpdatesStartTime` / `PauseFeatureUpdatesEndTime` | build date → `3000-01-01T00:00:00Z` |
+| `PauseQualityUpdatesStartTime` / `PauseQualityUpdatesEndTime` | build date → `3000-01-01T00:00:00Z` |
+
+`FlightSettingsMaxPauseDays` is the value the whole feature turns on. The window is enforced by
+the client and **clamped to the 35-day Settings maximum** unless that DWORD is raised, and a
+clamped window looks identical in Settings while the client keeps scanning. A recipe that sets
+only `PauseUpdatesExpiryTime` therefore produces an image that is paused in appearance and not
+in fact. 2026 → 3000 is about 355,700 days; the cap is set to 10,000 years so the target sits
+far inside it rather than merely inside it.
+
+Nothing else is touched in this mode. Services keep their stock start types, the task folders
+stay, `usoclient.exe` stays, and the Windows Update page is **not** hidden — it is the only
+place the pause is visible and the only way back. Only the Windows Security page is hidden.
+
+`Assert-WindowsUpdateState -Mode paused` reads the pause values and `FlightSettingsMaxPauseDays`
+back out of the mounted image, checks that none of the three services is `Start=4`, and fails
+the build if any of it did not land.
+
+> **A paused Core image still cannot install an update later.** `Optimize-WinSxS` throws away
+> almost the entire component store, so unpausing hands the client a stack with nothing to patch
+> from. Pause here means *quiet and reversible*, not *deferrable*. The failure mode it produces
+> is the same one described under "Do not stack a third-party playbook on top of this image"
+> below: failed pending transactions against a store that was already reset.
+
+#### If you build with `removed`
+
+Disabling `wuauserv` alone does not hold on modern Windows, and it is
 why a Core image can still show *"Updates are underway, do not turn off your PC"* on restart:
 
 - `WaaSMedicSvc` (Windows Update Medic) exists specifically to detect a disabled or broken
   Windows Update and **put it back**.
 - `UsoSvc` (Update Orchestrator) runs the servicing pass at boot.
 
-Core-Gaming **disables** all three services (`Start=4`, the keys stay), removes the Update
+`removed` mode **disables** all three services (`Start=4`, the keys stay), removes the Update
 Orchestrator / InstallService / WindowsUpdate / WaaSMedic scheduled tasks, sets `NoAutoUpdate`,
 and hides the Windows Update and Windows Security pages in Settings via the
 `SettingsPageVisibility` policy (`hide:windowsupdate;windowsdefender`).
@@ -197,13 +254,13 @@ machine, while the Windows Update client scanned at 00:59 and online package sta
 servicing of the Windows Update Agent component can re-register `wuauserv`, so there is no single
 moment after which the image is safe.
 
-So the lockdown is enforced in two places:
+So in `removed` mode the lockdown is enforced in two places:
 
 1. **A permanent boot guard.** The first-boot payload registers `\Tiny11\WindowsUpdateGuard`, a
    SYSTEM startup task that runs `gaming-firstboot.ps1 -WuGuard` two minutes after boot and then
    every two minutes for the first twenty minutes of that boot. It re-asserts and re-verifies,
    and it never removes itself.
-2. **A build-time gate.** `Assert-WindowsUpdateLockdown` reads the state back out of the mounted
+2. **A build-time gate.** `Assert-WindowsUpdateState -Mode removed` reads the state back out of the mounted
    image after every service and task pass, while the hives are still loaded. If `wuauserv`,
    `UsoSvc` or `WaaSMedicSvc` is not `Start=4`, or any of the four task folders survives, the
    build **fails**. This exists because the removal passes are best-effort against a system-owned
@@ -270,8 +327,8 @@ do to a fresh install: the debloat pass. It reproduces the "Essential Tweaks" an
 install, and bakes the result into the image.
 
 **It has no toggle.** There is no group flag, no `-GamingGroups` key and no workflow
-input — a Core-Gaming build always applies it, the same way it always removes Defender
-and the Windows Update stack. That is deliberate: the workflow is at GitHub's 25-input
+input — a Core-Gaming build always applies it, the same way it always removes Defender.
+That is deliberate: the workflow is at GitHub's 25-input
 cap, and this is meant to be part of what Core-Gaming *is*, not an option.
 
 Everything lives in [`config/essentials_profile.json`](config/essentials_profile.json).
@@ -659,7 +716,7 @@ runtime, install the redistributable once:
 | Printing of any kind | `disable_printing` |
 | Windows Search indexing (Start-menu search quality drops) | `strip_background_noise` |
 | Bluetooth devices | `strip_background_noise` |
-| Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings page | Always removed on a Core-Gaming build |
+| Windows Update — service, Update Medic (`WaaSMedicSvc`), Update Orchestrator (`UsoSvc`) and the Settings page | Not removed. Paused until 3000 by default; `removed` mode still exists on the builder |
 | Windows Defender / Windows Security Center | Always removed on a Core-Gaming build |
 | Memory Integrity / Core Isolation UI | `disable_security_mitigations` |
 
@@ -691,8 +748,9 @@ Balanced.
 
 **Not reversible from inside Windows** — the script tells you this too:
 
-- Windows Defender and Windows Update — both are always removed on a Core-Gaming
-  build, so there is nothing left to switch back on
+- Windows Defender — always removed on a Core-Gaming build, so there is nothing left to
+  switch back on. Windows Update is *not* in this list: the pause is reversible, and the
+  revert script clears it
 - The printing optional features
 - The removed Xbox AppX packages
 - The `bcdedit` mitigation flags (changeable with `bcdedit`, but not by this script)

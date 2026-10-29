@@ -196,6 +196,7 @@ Describe 'Argument assembly' {
             hags                = 'on'
             ltsc_edition        = ''
             gaming_groups       = @{ atlas_power_scheme = $true }
+            pause_windows_update = $true
             updateToLatest      = $true
             requireLatestUpdate = $false
         }
@@ -234,6 +235,19 @@ Describe 'Argument assembly' {
         $args.Contains('ISO') | Should -BeFalse
     }
 
+    It 'turns the pause checkbox into a builder mode' {
+        # The form asks a yes/no question; the builder takes paused|live. Both
+        # directions are asserted because a mapping that only ever yields one value
+        # would look correct in every other test here.
+        $on = New-BuilderArguments -Variant $gaming -Context $baseContext
+        $on['WindowsUpdateMode'] | Should -Be 'paused'
+
+        $offContext = $baseContext.Clone()
+        $offContext['pause_windows_update'] = $false
+        $off = New-BuilderArguments -Variant $gaming -Context $offContext
+        $off['WindowsUpdateMode'] | Should -Be 'live'
+    }
+
     It 'refuses a context that is missing a mapped value' {
         $broken = @{ isoDrive = '' }
         { New-BuilderArguments -Variant $gaming -Context $broken } |
@@ -268,6 +282,7 @@ Describe 'Generated scripts' {
             isoDrive = ''; image_index = '6'; scratchDrive = 'D'; skip_cleanup = $false
             enable_dotnet35 = $false; remove_defender = $false; account_setup = 'auto-admin'
             hags = 'on'; ltsc_edition = ''; gaming_groups = @{}
+            pause_windows_update = $true
             updateToLatest = $true; requireLatestUpdate = $true
         }
         $arguments = New-BuilderArguments -Variant $variant -Context $context
