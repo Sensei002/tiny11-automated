@@ -102,6 +102,36 @@
     and Core-Gaming only: that variant is the one that ships a first-boot payload to
     re-assert it on the target.
 
+.PARAMETER AtlasPlanPath
+    Path to a plan compiled from an AtlasOS playbook (.apbx) by
+    scripts/atlas-playbook.py. When set, the playbook's declarative tweaks -
+    registry values and keys, service start types, provisioned AppX packages - are
+    applied to the mounted image.
+
+    It runs after every built-in pass, including the gaming and essentials layers,
+    so Atlas wins wherever the two disagree. The playbook's script-driven actions
+    cannot run against an offline image; they are counted and listed in
+    Windows\AtlasPlaybook\ATLAS_PLAYBOOK.md inside the finished image.
+
+.PARAMETER AtlasAnswers
+    Answers to the playbook's questions, e.g.
+    @{ defender = 'enable'; mitigations = 'default'; auto_updates = 'disable' }.
+    Translated into playbook option names through config/atlas_options.json, so an
+    unknown answer fails the build instead of silently selecting the wrong branch.
+
+.PARAMETER AtlasInstallFolder
+    Copy the Atlas folder into the image: AtlasDesktop, AtlasModules and the theme
+    files, plus an Atlas shortcut on the default user's desktop and in the Start
+    Menu, and the three AtlasModules directories on the machine PATH. Defaults to
+    on, because a Core-Gaming image with Atlas tweaks baked in and no way to reach
+    them afterwards is worse than either extreme. Set -AtlasInstallFolder:$false for
+    a smaller image.
+
+.PARAMETER AtlasToolboxInstaller
+    Path to the official AtlasToolbox-Setup.exe. It is staged into the image and run
+    once by SetupComplete.cmd, elevated, before the first logon - an Inno Setup
+    installer cannot be applied to a mounted image, but it can be run on first boot.
+
 .EXAMPLE
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 1
     .\tiny11coremaker-headless.ps1 -ISO E -INDEX 6 -SCRATCH D -SkipCleanup
@@ -183,7 +213,19 @@ param (
 
     [Parameter(Mandatory=$false, HelpMessage="What the finished image does about Windows Update. 'paused' (default) keeps the entire update stack intact and writes a pause window that expires in the year 3000; 'live' leaves Windows Update exactly as Microsoft ships it; 'removed' disables the services, deletes the client binaries and strips the scheduling tasks, which makes the image non-serviceable. See GAMING.md.")]
     [ValidateSet('paused', 'live', 'removed')]
-    [string]$WindowsUpdateMode = 'paused'
+    [string]$WindowsUpdateMode = 'paused',
+
+    [Parameter(Mandatory=$false, HelpMessage="Path to a compiled Atlas playbook plan (scripts/atlas-playbook.py --out). When set, the playbook's declarative tweaks are applied to the mounted image after every built-in pass has run, so Atlas has the final word.")]
+    [string]$AtlasPlanPath,
+
+    [Parameter(Mandatory=$false, HelpMessage="Answers to the Atlas playbook's questions, e.g. @{ defender = 'enable'; auto_updates = 'disable' }. Mapped onto playbook option names through config/atlas_options.json.")]
+    [hashtable]$AtlasAnswers,
+
+    [Parameter(Mandatory=$false, HelpMessage="Copy the Atlas folder (AtlasDesktop, AtlasModules, themes) into the image, add it to the machine PATH and drop Desktop/Start Menu shortcuts. On by default; only meaningful together with -AtlasPlanPath.")]
+    [bool]$AtlasInstallFolder = $true,
+
+    [Parameter(Mandatory=$false, HelpMessage="Path to the official AtlasToolbox-Setup.exe. When set, the installer is staged into the image and run once by SetupComplete.cmd before the first logon.")]
+    [string]$AtlasToolboxInstaller
 )
 
 #---------[ Error Handling ]---------
@@ -227,6 +269,20 @@ if ($GamingProfile) {
         throw "Gaming profile requested but the essentials engine was not found at $essentialsModule"
     }
     . $essentialsModule
+}
+
+#---------[ Atlas playbook (optional) ]---------
+# Dot-sourced only when a plan is supplied, so every other variant is untouched. The
+# plan is produced by scripts/atlas-playbook.py, which owns the YAML parsing; this
+# module only executes it against the mounted image.
+$atlasSelectedOptions = $null
+
+if ($AtlasPlanPath) {
+    $atlasModule = Join-Path $PSScriptRoot 'atlas-playbook.ps1'
+    if (-not (Test-Path -LiteralPath $atlasModule)) {
+        throw "Atlas plan requested but the applier was not found at $atlasModule"
+    }
+    . $atlasModule
 }
 
 # Initialize admin identifiers for permission operations
@@ -2353,6 +2409,16 @@ try {
         Write-Log "Essentials pass: ENABLED (always on for Core-Gaming, $(@($essentialsProfileData.registry).Count) registry value(s), $(@($essentialsProfileData.services).Count) service(s))"
     }
 
+    # Atlas playbook: resolve the answers before anything is downloaded or mounted, so
+    # a typo in the option map fails in seconds instead of after an hour of DISM.
+    if ($AtlasPlanPath) {
+        Initialize-AtlasModule -LogFile $logFile -ProfileDirectory $gamingConfigDir
+        $atlasPlan = Import-AtlasPlan -Path $AtlasPlanPath
+        $atlasResolution = Resolve-AtlasOptions -Answers $AtlasAnswers
+        $atlasSelectedOptions = $atlasResolution.Selected
+        Write-Log "Atlas layer: ENABLED ($($atlasPlan.playbook.name) $($atlasPlan.playbook.version), $($atlasSelectedOptions.Count) option(s) selected)"
+    }
+
     Test-Prerequisites
     Initialize-Directories
 
@@ -2486,7 +2552,51 @@ try {
     # for all of them, an unverified pause is exactly as bad as an unverified removal.
     Assert-WindowsUpdateState -MountDir $scratchDir -Mode $WindowsUpdateMode
 
+    # Atlas playbook, registry half. Deliberately the last registry pass of the build:
+    # the playbook is meant to have the final word, so it runs after the Core,
+    # performance, gaming and essentials layers. It sits after
+    # Assert-WindowsUpdateState so that assertion still verifies the workflow's own
+    # Windows Update contract rather than whatever Atlas wrote over it.
+    if ($AtlasPlanPath) {
+        Invoke-AtlasRegistryPhase -SelectedOptions $atlasSelectedOptions
+
+        # The Atlas folder needs to be on PATH for its own scripts to resolve their
+        # cmdlets, and PATH is a registry value - so it has to be written here, while
+        # the hives are still loaded, not with the file copy below.
+        if ($AtlasInstallFolder) {
+            Add-AtlasModulePath
+        }
+    }
+
     Unload-RegistryHives
+
+    # Atlas playbook, AppX half. DISM package operations must not race a loaded hive -
+    # the same rule the gaming profile's removal passes follow - so this is on the
+    # other side of Unload-RegistryHives.
+    if ($AtlasPlanPath) {
+        Invoke-AtlasAppxPhase -MountDir $scratchDir -SelectedOptions $atlasSelectedOptions
+
+        # The Atlas folder itself. Copied from the unpacked playbook, so the image
+        # boots with the same AtlasDesktop / AtlasModules tree a normal Atlas install
+        # has, including the theme files and the shortcuts that point at it.
+        if ($AtlasInstallFolder) {
+            $atlasExtracted = $atlasPlan.playbook.extractedPath
+            if (-not $atlasExtracted -or -not (Test-Path -LiteralPath $atlasExtracted)) {
+                throw "The plan points at an Atlas extraction that no longer exists: $atlasExtracted"
+            }
+            Invoke-AtlasFolderPhase -MountDir $scratchDir -ExtractedPath $atlasExtracted
+        }
+
+        if ($AtlasToolboxInstaller) {
+            Invoke-AtlasToolboxPhase -MountDir $scratchDir -InstallerPath $AtlasToolboxInstaller
+        }
+
+        Write-AtlasManifest -MountDir $scratchDir `
+            -SelectedOptions ($atlasSelectedOptions -join ', ') `
+            -ResolvedAnswers $atlasResolution.Answers `
+            -FolderInstalled $AtlasInstallFolder `
+            -ToolboxStaged ([bool]$AtlasToolboxInstaller)
+    }
 
     # WinSxS optimization (CORE-specific)
     Optimize-WinSxS
