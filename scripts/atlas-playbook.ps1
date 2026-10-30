@@ -88,14 +88,22 @@ function Write-AtlasLog {
         [string]$Message,
         [string]$Level = 'INFO'
     )
-    if (Get-Command -Name Write-Log -CommandType Function -ErrorAction SilentlyContinue) {
-        Write-Log $Message $Level
-        return
-    }
+
     $line = "[{0}] [{1}] {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
+
+    # Write-Host, deliberately, and never Write-Output or the builder's Write-Log.
+    #
+    # The builder's Write-Log emits to the output stream, so a function here that
+    # logs and then returns a value would hand its caller the log lines in front of
+    # the value. That is not theoretical: Import-AtlasPlan returned
+    # @(log, log, ..., $plan), the caller's $atlasPlan aliased $script:AtlasPlan
+    # (variable names are case-insensitive), and the plan was replaced by an array -
+    # which then failed deep inside Resolve-AtlasOptions with "the array index
+    # evaluated to null". Host output cannot be captured by accident.
     Write-Host $line
+
     if ($script:AtlasLogFile) {
-        Add-Content -LiteralPath $script:AtlasLogFile -Value $line -Encoding UTF8
+        Add-Content -LiteralPath $script:AtlasLogFile -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
     }
 }
 
@@ -149,7 +157,14 @@ function Resolve-AtlasOptions {
 
     $declared = @{}
     foreach ($option in @(Get-AtlasField $script:AtlasPlan 'options')) {
-        $declared[(Get-AtlasField $option 'name')] = $true
+        $optionName = Get-AtlasField $option 'name'
+        if ([string]::IsNullOrWhiteSpace($optionName)) {
+            # Guard, not decoration: indexing a hashtable with $null reports
+            # "the array index evaluated to null", which says nothing about the
+            # real problem. This only fires if the plan is malformed.
+            throw "Atlas plan contains an option with no name: $($option | Out-String)"
+        }
+        $declared[$optionName] = $true
     }
 
     $selected = New-Object System.Collections.Generic.List[string]

@@ -448,6 +448,60 @@ Describe 'Atlas folder and Toolbox' {
     }
 }
 
+Describe 'Atlas return values survive a chatty logger' {
+    <#
+        The builder's Write-Log emits to the output stream. Every test above ran
+        without that function defined, so Write-AtlasLog fell back to Write-Host and
+        the module looked fine - while in the real build Import-AtlasPlan returned
+        @(log, log, ..., $plan) and the plan was replaced by that array. The build
+        then died in Resolve-AtlasOptions with "the array index evaluated to null"
+        after 0.0s, which is what sent the first CI run red.
+
+        These tests pin the contract: logging must never enter the pipeline.
+    #>
+
+    It 'Write-AtlasLog writes to the host and the log file, never to the pipeline' {
+        $logPath = Join-Path ([System.IO.Path]::GetTempPath()) "atlas-log-$PID.log"
+        Initialize-AtlasModule -LogFile $logPath -ProfileDirectory $configDir -RegistryRoot $script:testRootKey
+        try {
+            $captured = Write-AtlasLog 'pipeline check' 'INFO'
+            $captured | Should -BeNullOrEmpty
+            (Get-Content -LiteralPath $logPath -Raw) | Should -Match 'pipeline check'
+        } finally {
+            Remove-Item -LiteralPath $logPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Import-AtlasPlan returns exactly one object even with a Write-Log on the output stream' {
+        # Reproduce the builder's logger, which is what broke the return value.
+        function global:Write-Log {
+            param([string]$Message, [string]$Level = 'INFO')
+            Write-Output "[$Level] $Message"
+        }
+        try {
+            $plan = Import-AtlasPlan -Path $script:planFixture
+            @($plan).Count | Should -Be 1
+            $plan.playbook.version | Should -Be '0.5.0'
+        } finally {
+            Remove-Item function:global:Write-Log -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Resolve-AtlasOptions returns exactly one object and a usable Selected list' {
+        function global:Write-Log {
+            param([string]$Message, [string]$Level = 'INFO')
+            Write-Output "[$Level] $Message"
+        }
+        try {
+            $resolution = Resolve-AtlasOptions -Answers @{ defender = 'disable' }
+            @($resolution).Count | Should -Be 1
+            $resolution.Selected | Should -Contain 'defender-disable'
+        } finally {
+            Remove-Item function:global:Write-Log -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Describe 'Atlas wiring' {
     It 'exposes the plan, answers, folder and toolbox on the builder' {
         $builderRaw | Should -Match '\[string\]\$AtlasPlanPath'

@@ -2413,10 +2413,10 @@ try {
     # a typo in the option map fails in seconds instead of after an hour of DISM.
     if ($AtlasPlanPath) {
         Initialize-AtlasModule -LogFile $logFile -ProfileDirectory $gamingConfigDir
-        $atlasPlan = Import-AtlasPlan -Path $AtlasPlanPath
+        $atlasPlanData = Import-AtlasPlan -Path $AtlasPlanPath
         $atlasResolution = Resolve-AtlasOptions -Answers $AtlasAnswers
         $atlasSelectedOptions = $atlasResolution.Selected
-        Write-Log "Atlas layer: ENABLED ($($atlasPlan.playbook.name) $($atlasPlan.playbook.version), $($atlasSelectedOptions.Count) option(s) selected)"
+        Write-Log "Atlas layer: ENABLED ($($atlasPlanData.playbook.name) $($atlasPlanData.playbook.version), $($atlasSelectedOptions.Count) option(s) selected)"
     }
 
     Test-Prerequisites
@@ -2580,7 +2580,7 @@ try {
         # boots with the same AtlasDesktop / AtlasModules tree a normal Atlas install
         # has, including the theme files and the shortcuts that point at it.
         if ($AtlasInstallFolder) {
-            $atlasExtracted = $atlasPlan.playbook.extractedPath
+            $atlasExtracted = $atlasPlanData.playbook.extractedPath
             if (-not $atlasExtracted -or -not (Test-Path -LiteralPath $atlasExtracted)) {
                 throw "The plan points at an Atlas extraction that no longer exists: $atlasExtracted"
             }
