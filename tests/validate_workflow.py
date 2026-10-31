@@ -38,7 +38,6 @@ BUILD_WORKFLOWS = [
     "build-tiny11.yml",
     "build-tiny11-core.yml",
     "build-tiny11-core-gaming.yml",
-    "build-tiny11-atlas.yml",
     "build-nano11.yml",
     "build-tiny11-ltsc.yml",
     "build-tiny11-core-ltsc.yml",
@@ -327,8 +326,6 @@ def validate_sourceforge_folders() -> None:
         "build-tiny11.yml": '"Tiny11-$edition-$version"',
         "build-tiny11-core.yml": '"Tiny11Core-$edition-$version"',
         "build-tiny11-core-gaming.yml": '"Tiny11CoreGaming-$edition-$version"',
-        # The Atlas channel must not drop its ISOs into the stable folder.
-        "build-tiny11-atlas.yml": '"Tiny11Atlas-$edition-$version"',
         "build-nano11.yml": '"Nano11-$edition-$version"',
     }
 
