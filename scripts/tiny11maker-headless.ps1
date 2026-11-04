@@ -26,10 +26,34 @@
       classic    - let OOBE run offline so the person installing creates their own
                    local account with their own name. No Microsoft account.
 
+.PARAMETER GamingProfile
+    Apply a gaming profile on top of the Standard image. The image stays serviceable;
+    only the registry, service, package and first-boot tweaks in the profile are added.
+
+.PARAMETER GamingProfileFile
+    Path to the gaming profile JSON. Defaults to config/gaming_profile.json.
+
+.PARAMETER GamingGroups
+    Per-group on/off overrides, e.g. @{ disable_mpo = $false }.
+
+.PARAMETER HagsMode
+    'on', 'off' or 'leave' (default). 'leave' keeps the Standard default, which is on.
+
+.PARAMETER PreserveWebView2
+    Keep the Edge WebView2 runtime instead of removing it. Required by the compatible
+    preset for apps such as Elgato Wave Link.
+
+.PARAMETER PreserveXbox
+    Keep the Xbox AppX packages that Standard normally removes, leaving the gaming
+    profile in charge of whether the Xbox stack is removed.
+
 .EXAMPLE
     .\tiny11maker-headless.ps1 -ISO E -INDEX 1
     .\tiny11maker-headless.ps1 -ISO E -INDEX 6 -SCRATCH D
     .\tiny11maker-headless.ps1 -ISO E -INDEX 6 -AccountSetup classic
+    .\tiny11maker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
+        -GamingProfileFile .\config\gaming_profile_compatible.json `
+        -PreserveWebView2 -PreserveXbox
 
 .NOTES
     Original Author: ntdevlabs
@@ -70,7 +94,26 @@ param (
 
     [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
-    [string]$AccountSetup = 'auto-admin'
+    [string]$AccountSetup = 'auto-admin',
+
+    [Parameter(Mandatory=$false, HelpMessage="Apply a Tiny11 gaming profile on top of the Standard image. The Standard base stays serviceable; the profile is data-driven from config/gaming_profile.json (or -GamingProfileFile). Off by default.")]
+    [switch]$GamingProfile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Path to the gaming profile JSON. Defaults to config/gaming_profile.json in the repository root. Use config/gaming_profile_compatible.json for the Standard-Gaming compatible preset.")]
+    [string]$GamingProfileFile,
+
+    [Parameter(Mandatory=$false, HelpMessage="Hashtable of per-group on/off overrides, e.g. @{ disable_mpo = `$false }. Groups not listed use the profile defaults.")]
+    [hashtable]$GamingGroups,
+
+    [Parameter(Mandatory=$false, HelpMessage="Hardware Accelerated GPU Scheduling: 'on' forces it on, 'off' forces it off, 'leave' keeps the Standard default (already on).")]
+    [ValidateSet('on', 'off', 'leave')]
+    [string]$HagsMode = 'leave',
+
+    [Parameter(Mandatory=$false, HelpMessage="Keep the Edge WebView2 runtime when a gaming profile is applied. Standard normally removes it; the compatible preset needs it for apps such as Elgato Wave Link and many game launchers.")]
+    [switch]$PreserveWebView2,
+
+    [Parameter(Mandatory=$false, HelpMessage="Keep the Xbox AppX packages that Standard normally removes, so the gaming profile can decide whether the Xbox stack is removed.")]
+    [switch]$PreserveXbox
 )
 
 #---------[ Error Handling ]---------#
@@ -90,6 +133,22 @@ $scratchDir = "$ScratchDisk\scratchdir"
 $tiny11Dir = "$ScratchDisk\tiny11"
 $outputISO = "$PSScriptRoot\tiny11.iso"
 $logFile = "$PSScriptRoot\tiny11_$(Get-Date -Format yyyyMMdd_HHmmss).log"
+
+#---------[ Gaming profile (optional) ]---------
+# The profile engine is data-driven and is dot-sourced only when -GamingProfile is set,
+# so a plain Standard build is completely unaffected.
+$gamingProfileData = $null
+$gamingGroupFlags = $null
+$gamingProfilePath = $null
+$gamingConfigDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'config'
+
+if ($GamingProfile) {
+    $gamingModule = Join-Path $PSScriptRoot 'gaming-profile.ps1'
+    if (-not (Test-Path -LiteralPath $gamingModule)) {
+        throw "Gaming profile requested but the engine was not found at $gamingModule"
+    }
+    . $gamingModule
+}
 
 #---------[ Functions ]---------#
 function Write-Log {
@@ -578,6 +637,16 @@ function Remove-BloatwareApps {
         'Microsoft.Windows.CoreAI',
         'Microsoft.Recall'
     )
+
+    if ($PreserveXbox) {
+        # The gaming profile decides whether the Xbox stack goes. Standard otherwise
+        # removes these before the profile ever sees them, which makes
+        # remove_xbox_gaming_stack = false impossible to honour.
+        $packagePrefixes = @($packagePrefixes | Where-Object {
+            $_ -notlike 'Microsoft.Xbox*' -and $_ -ne 'Microsoft.GamingApp'
+        })
+        Write-Log "Preserving Xbox AppX packages (-PreserveXbox)"
+    }
     
     $packagesToRemove = $packages | Where-Object {
         $packageName = $_
@@ -595,7 +664,10 @@ function Remove-BloatwareApps {
 }
 
 function Remove-EdgeAndOneDrive {
-    Write-Log "Removing Microsoft Edge and Edge WebView..."
+    Write-Log "Removing Microsoft Edge..."
+    if ($PreserveWebView2) {
+        Write-Log "Preserving the Edge WebView2 runtime (-PreserveWebView2)"
+    }
     
     $adminSID = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
     $adminGroup = $adminSID.Translate([System.Security.Principal.NTAccount])
@@ -603,10 +675,15 @@ function Remove-EdgeAndOneDrive {
     $edgePaths = @(
         "$scratchDir\Program Files (x86)\Microsoft\Edge",
         "$scratchDir\Program Files (x86)\Microsoft\EdgeUpdate",
-        "$scratchDir\Program Files (x86)\Microsoft\EdgeCore",
-        "$scratchDir\Program Files (x86)\Microsoft\EdgeWebView",
-        "$scratchDir\Windows\System32\Microsoft-Edge-Webview"
+        "$scratchDir\Program Files (x86)\Microsoft\EdgeCore"
     )
+
+    if (-not $PreserveWebView2) {
+        $edgePaths += @(
+            "$scratchDir\Program Files (x86)\Microsoft\EdgeWebView",
+            "$scratchDir\Windows\System32\Microsoft-Edge-Webview"
+        )
+    }
     
     foreach ($path in $edgePaths) {
         if (Test-Path $path) {
@@ -617,15 +694,17 @@ function Remove-EdgeAndOneDrive {
         }
     }
     
-    # Remove Edge WebView directories inside WinSxS (covers amd64 and arm64)
-    Write-Log "Removing Edge WebView assemblies from WinSxS..."
-    $winSxSPaths = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "*microsoft-edge-webview_31bf3856ad364e35*" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
-    foreach ($winSxSPath in $winSxSPaths) {
-        if (Test-Path $winSxSPath) {
-            Write-Log "Taking ownership and removing WinSxS WebView folder: $winSxSPath"
-            & takeown /f $winSxSPath /r /a | Out-Null
-            & icacls $winSxSPath /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
-            Remove-Item -Path $winSxSPath -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not $PreserveWebView2) {
+        # Remove Edge WebView directories inside WinSxS (covers amd64 and arm64)
+        Write-Log "Removing Edge WebView assemblies from WinSxS..."
+        $winSxSPaths = Get-ChildItem -Path "$scratchDir\Windows\WinSxS" -Filter "*microsoft-edge-webview_31bf3856ad364e35*" -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+        foreach ($winSxSPath in $winSxSPaths) {
+            if (Test-Path $winSxSPath) {
+                Write-Log "Taking ownership and removing WinSxS WebView folder: $winSxSPath"
+                & takeown /f $winSxSPath /r /a | Out-Null
+                & icacls $winSxSPath /grant "$($adminGroup.Value):(F)" /T /C | Out-Null
+                Remove-Item -Path $winSxSPath -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
     }
     
@@ -1212,6 +1291,29 @@ try {
     Write-Log "=== Tiny11 Headless Builder Started ===" "INFO"
     Write-Log "Author: Sensei002 (https://github.com/Sensei002)"
     Write-Log "Parameters: ISO=$ISO, INDEX=$INDEX, SCRATCH=$ScratchDisk, AccountSetup=$AccountSetup"
+    if ($GamingProfile) { Write-Log "Gaming profile: ENABLED (HagsMode=$HagsMode)" }
+
+    if ($GamingProfile) {
+        Initialize-GamingModule -LogFile $logFile -ProfileDirectory $gamingConfigDir
+        $gamingProfilePath = $GamingProfileFile
+        if ([string]::IsNullOrWhiteSpace($gamingProfilePath)) {
+            $gamingProfilePath = Get-GamingConfigPath 'gaming_profile.json'
+        }
+        if (-not $gamingProfilePath -or -not (Test-Path -LiteralPath $gamingProfilePath)) {
+            throw "Gaming profile not found. Expected $gamingProfilePath"
+        }
+        $gamingProfilePath = (Resolve-Path -LiteralPath $gamingProfilePath).Path
+        $gamingProfileData = Import-GamingProfile -Path $gamingProfilePath
+        $gamingGroupFlags = Resolve-GamingGroups -Profile $gamingProfileData -Overrides $GamingGroups
+
+        $onGroups = @()
+        $offGroups = @()
+        foreach ($name in ($gamingGroupFlags.Keys | Sort-Object)) {
+            if ($gamingGroupFlags[$name]) { $onGroups += $name } else { $offGroups += $name }
+        }
+        Write-Log "Gaming groups ON : $($onGroups -join ', ')"
+        Write-Log "Gaming groups OFF: $(if ($offGroups.Count -gt 0) { $offGroups -join ', ' } else { '(none)' })"
+    }
     
     Test-Prerequisites
     
@@ -1240,19 +1342,58 @@ try {
 
     # Customization phase
     Remove-BloatwareApps
+
+    # Gaming profile: image-level removals. These run while the image hives are still
+    # unloaded, because DISM package/feature operations must not race with a mounted hive.
+    if ($GamingProfile) {
+        Invoke-GamingAppxRemoval            -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
+        Invoke-GamingSystemPackageRemoval   -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
+        Invoke-GamingOptionalFeatureRemoval -Profile $gamingProfileData -Groups $gamingGroupFlags -ScratchDir $scratchDir
+    }
+
     Remove-EdgeAndOneDrive
     Apply-RegistryTweaks
     Apply-PerformanceTweaks
+
+    # Gaming profile must run after Apply-PerformanceTweaks so it can deliberately
+    # override the Standard defaults (Game Mode on -> off, and HiberbootEnabled 1 -> 0
+    # when the disable_fast_startup group is enabled).
+    if ($GamingProfile) {
+        Invoke-GamingRegistryTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
+        Set-GamingHagsMode -Profile $gamingProfileData -HagsMode $HagsMode
+    }
+
     Remove-ScheduledTasks
     Remove-NonEssentialServices
+
+    if ($GamingProfile) {
+        Invoke-GamingServiceTweaks -Profile $gamingProfileData -Groups $gamingGroupFlags
+    }
+
     Unload-RegistryHives
     
     # Finalization phase
     Optimize-WindowsImage
+
+    # Gaming profile: stage the first-boot payload before Dismount-AndExport so the
+    # files land inside install.wim. Only install.wim is touched - never boot.wim.
+    if ($GamingProfile) {
+        New-GamingFirstBootPayload -Profile $gamingProfileData -Groups $gamingGroupFlags `
+            -ScratchDir $scratchDir -ScriptRoot $PSScriptRoot -ProfilePath $gamingProfilePath `
+            -HagsMode $HagsMode -WindowsUpdateMode 'live'
+    }
+
     Dismount-AndExport
     Process-BootImage
     Create-TinyISO
     Write-BuildInfo -OutputPath "$PSScriptRoot\tiny11-buildinfo.json"
+
+    if ($GamingProfile) {
+        Write-GamingBuildInfo -Profile $gamingProfileData -Groups $gamingGroupFlags `
+            -OutputPath "$PSScriptRoot\tiny11-standard-gaming-buildinfo.json" `
+            -HagsMode $HagsMode -WindowsBuild $script:DetectedBuildNumber `
+            -WindowsUpdateMode 'live'
+    }
     
     # Cleanup
     Invoke-Cleanup

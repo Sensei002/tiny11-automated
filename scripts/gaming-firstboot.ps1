@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Tiny11 Core-Gaming first-boot payload.
+    Tiny11 gaming first-boot payload (Core-Gaming and Standard-Gaming).
 
 .DESCRIPTION
     Executed once, as SYSTEM, by Windows\Setup\Scripts\SetupComplete.cmd at the end of
@@ -568,7 +568,7 @@ function Invoke-EssentialsFirstBoot {
     #    install.
     if ($fb.restorePoint) {
         $description = $fb.restorePointDescription
-        if (-not $description) { $description = 'Tiny11 Core-Gaming baseline' }
+        if (-not $description) { $description = 'Tiny11 gaming baseline' }
         try {
             $systemDrive = "$env:SystemDrive\"
             Enable-ComputerRestore -Drive $systemDrive -ErrorAction Stop
@@ -1024,7 +1024,7 @@ function Invoke-WindowsUpdateGuard {
 #---------[ Main ]---------#
 
 Write-Log "=============================================="
-Write-Log "Tiny11 Core-Gaming first-boot payload starting"
+Write-Log "Tiny11 gaming first-boot payload starting"
 Write-Log "=============================================="
 
 if (-not (Test-IsElevated)) {

@@ -359,7 +359,7 @@ function Set-GamingHagsMode {
     )
 
     if ($HagsMode -eq 'leave') {
-        Write-GamingLog "HAGS left at the Core default (on)"
+        Write-GamingLog "HAGS left at the builder default"
         return
     }
 
@@ -621,6 +621,7 @@ function New-GamingFirstBootPayload {
         [hashtable]$Groups,
         [string]$ScratchDir,
         [string]$ScriptRoot,
+        [string]$ProfilePath,
         [string]$HagsMode = 'on',
         [ValidateSet('paused', 'live', 'removed')]
         [string]$WindowsUpdateMode = 'paused'
@@ -653,9 +654,12 @@ function New-GamingFirstBootPayload {
     }
 
     # The full profile travels with the image so Undo-GamingTweaks.ps1 can read its
-    # revert block from the same source of truth the builder used.
-    $profileConfig = Get-GamingConfigPath 'gaming_profile.json'
-    if ($profileConfig) {
+    # revert block from the same source of truth the builder used. ProfilePath matters
+    # for a non-default preset: without it this copied gaming_profile.json and the
+    # revert script would undo the wrong group set.
+    $profileConfig = $ProfilePath
+    if (-not $profileConfig) { $profileConfig = Get-GamingConfigPath 'gaming_profile.json' }
+    if ($profileConfig -and (Test-Path -LiteralPath $profileConfig)) {
         Copy-Item -LiteralPath $profileConfig -Destination (Join-Path $gamingDir 'gaming_profile.json') -Force
         Write-GamingLog "  staged gaming_profile.json"
     } else {

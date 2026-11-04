@@ -4,6 +4,7 @@
 [![Build Tiny11 Core](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core.yml)
 [![Build Nano11](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-nano11.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-nano11.yml)
 [![Build Tiny11 Core-Gaming](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-core-gaming.yml)
+[![Build Tiny11 Standard-Gaming](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-standard-gaming.yml/badge.svg)](https://github.com/Sensei002/tiny11-automated/actions/workflows/build-tiny11-standard-gaming.yml)
 [![SourceForge Downloads](https://img.shields.io/sourceforge/dt/tiny11-automated.svg)](https://sourceforge.net/projects/tiny11-automated/files/latest/download)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -69,6 +70,12 @@ Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 
 - 🔁 **Reversible**: ships an undo script and a per-build manifest inside the ISO
 - 📖 Full details in **[GAMING.md](GAMING.md)**
 
+**🧩 Tiny11 Standard-Gaming — new variant:**
+- 🛡️ **Compatibility first**: keeps WinSxS servicing, WebView2, Bluetooth, the Xbox stack, printing and Defender
+- ⚡ **Same latency engine**: power scheme, FSO off, MPO off, input/network latency and instant windows
+- 🔁 **Reversible**: the compatible preset removes no packages or features, and ships the undo script
+- 📖 Full details in **[GAMING.md](GAMING.md#standard-gaming-variant)**
+
 **Windows 11 26H2 Optimizations:**
 - ✨ **AI/Recall Removal**: Complete removal of Copilot, Recall, and AI Fabric (~220 MB saved)
 - 🛡️ **Enhanced Telemetry Blocking**: Stronger privacy protection with additional registry tweaks
@@ -93,10 +100,12 @@ Tiny11 Automated Builder provides **production-ready PowerShell scripts** to cre
 🤖 **Full CI/CD automation** (GitHub Actions workflows)  
 🛠️ **System requirement bypass** (TPM, CPU, RAM checks removed)
 
-**Three variants** available: **Standard** (daily use), **Core** (ultra-minimal), **Nano** (VM testing)
+**Three base variants** available: **Standard** (daily use), **Core** (ultra-minimal),
+**Nano** (VM testing)
 
-**Plus an opt-in gaming profile**: **Core-Gaming** layers a latency-first, AtlasOS-style
-tweak set on top of Core for competitive esports. See **[GAMING.md](GAMING.md)**.
+**Two gaming builds** layer the same engine on top: **Core-Gaming** for competitive
+esports, and **Standard-Gaming** for a serviceable daily driver that keeps WebView2,
+Bluetooth, the Xbox stack and printing. See **[GAMING.md](GAMING.md)**.
 
 ### 🙏 Attribution
 
@@ -132,6 +141,7 @@ Perfect for beginners and automated deployments:
    - `Build Tiny11 Core` → Ultra-minimal variant
    - `Build Nano11` → EXTREME minimal (VM only)
    - `Build Tiny11 Core-Gaming` → Core + latency-first gaming profile
+   - `Build Tiny11 Standard-Gaming` → Standard + compatible gaming profile
 4. Click **"Run workflow"** and configure:
    - Windows ISO URL
    - Edition (Home/Pro/Education)
@@ -270,6 +280,9 @@ Set-ExecutionPolicy Bypass -Scope Process
 - **🔴 Nano**: Absolute minimal testing only. Expect broken features. VM use ONLY.
 - **🎮 Core-Gaming**: Core plus a latency-first gaming profile. Built for competitive
   esports on older hardware — see the section below before you use it.
+- **🧩 Standard-Gaming**: Standard plus a conservative gaming layer. Keeps WinSxS
+  servicing, WebView2, Bluetooth, the Xbox stack, printing and Defender — see the
+  section below.
 - **🏢 LTSC**: Standard or Core on Windows 11 / Windows 10 Enterprise LTSC media.
   Separate workflows, edition picked by name — see [LTSC.md](LTSC.md).
 
@@ -354,6 +367,71 @@ Full write-up, per-setting rationale and trade-offs: **[GAMING.md](GAMING.md)**.
 
 ---
 
+## 🧩 Tiny11 Standard-Gaming
+
+> **Status: implemented.** Run the **Build and Release Tiny11 Standard-Gaming** workflow
+> (`.github/workflows/build-tiny11-standard-gaming.yml`), or pass the switches to the
+> Standard builder locally. Existing workflows, presets and defaults are untouched.
+
+Standard is the serviceable, daily-driver base. Core-Gaming is the latency-first build
+that strips WebView2, WinSxS servicing and Bluetooth. **Standard-Gaming** combines them:
+the Standard base plus the existing `gaming-profile.ps1` engine and a conservative preset
+(`config/gaming_profile_compatible.json`).
+
+| | Standard | Core-Gaming | Standard-Gaming |
+|---|---|---|---|
+| Base | Standard | Core | Standard |
+| WinSxS servicing | ✅ | ❌ | ✅ |
+| WebView2 runtime | ❌ removed | ❌ removed | ✅ kept |
+| Bluetooth | ✅ | ❌ | ✅ kept (compatible preset) |
+| Xbox stack | ❌ removed | ❌ removed | ✅ kept (compatible preset) |
+| Printing | ✅ | ❌ removed | ✅ kept (compatible preset) |
+| Defender | ✅ | ❌ | ✅ |
+| Windows Update | ✅ serviceable | ⏸️ paused | ✅ serviceable |
+| Gaming tweaks | — | full aggressive set | compatible preset |
+
+The compatible preset leaves VBS/HVCI enabled, keeps the Xbox stack, Bluetooth, printing
+and Windows Update serviceable, and enables the low-risk latency tweaks: power scheme,
+Fullscreen Optimizations off, MPO off, input latency, network latency and instant window
+response. HAGS defaults to `leave` instead of `on`, and Fast Startup/hibernation stay
+enabled (see [GAMING.md](GAMING.md#fast-startup-and-hibernation)).
+
+### How to build it
+
+**GitHub Actions** → run **Build and Release Tiny11 Standard-Gaming**. It keeps the
+Standard inputs and adds three gaming ones:
+
+```yaml
+gaming_preset:       # compatible (default) | aggressive
+disable_cpu_idle:    # default false
+hags:                # on | off | leave (default)
+```
+
+**Locally:**
+
+```powershell
+# Compatible preset (the workflow default)
+.\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
+    -GamingProfileFile .\config\gaming_profile_compatible.json `
+    -PreserveWebView2 -PreserveXbox
+
+# Aggressive preset on the Standard base
+.\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
+    -PreserveWebView2 -PreserveXbox
+```
+
+`-PreserveWebView2` keeps the Edge WebView2 runtime while Edge itself and OneDrive are
+still removed. `-PreserveXbox` keeps the Xbox AppX packages so the preset can decide
+whether to remove them. The workflow always passes both.
+
+Every tweak lives in the same group-tagged JSON as Core-Gaming, and the revert script is
+staged at `C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1`.
+
+Full write-up, group-by-group defaults and limitations:
+**[GAMING.md → Standard-Gaming variant](GAMING.md#standard-gaming-variant)**.
+
+---
+
 ## 🏢 Tiny11 LTSC
 
 Two extra workflows build the same variants on Windows 11 / Windows 10 Enterprise
@@ -389,6 +467,7 @@ tiny11-automated/
 │   │   ├── build-tiny11.yml
 │   │   ├── build-tiny11-core.yml
 │   │   ├── build-tiny11-core-gaming.yml   # 🎮 Core + gaming profile
+│   │   ├── build-tiny11-standard-gaming.yml # 🧩 Standard + compatible gaming profile
 │   │   ├── build-tiny11-ltsc.yml          # 🏢 Standard on LTSC media
 │   │   ├── build-tiny11-core-ltsc.yml     # 🏢 Core on LTSC media
 │   │   └── build-nano11.yml
@@ -399,10 +478,11 @@ tiny11-automated/
 ├── config/
 │   ├── matrix_config.json              # Release-detection / trigger config
 │   ├── gaming_profile.json             # 🎮 Every gaming tweak, group-tagged
+│   ├── gaming_profile_compatible.json  # 🧩 Compatibility-first preset
 │   ├── gaming_power_settings.json      # 🎮 Power scheme + bcdedit definition
 │   └── essentials_profile.json         # 🎮 Debloat pass, one entry per checkbox
 ├── scripts/
-│   ├── tiny11maker-headless.ps1          # ✨ Automated Standard
+│   ├── tiny11maker-headless.ps1          # ✨ Automated Standard (+ -GamingProfile)
 │   ├── tiny11coremaker-headless.ps1      # ✨ Automated Core (+ -GamingProfile)
 │   ├── nano11builder-headless.ps1        # ✨ Automated Nano
 │   ├── ltsc-edition-catalog.ps1          # 🏢 LTSC editions, indexes and slugs
@@ -414,7 +494,7 @@ tiny11-automated/
 │   └── Undo-GamingTweaks.ps1             # 🎮 Revert, shipped inside the image
 ├── autounattend.xml            # Offline local account + OOBE bypass (Standard/Core)
 ├── autounattend-nano.xml       # Offline local account + OOBE bypass (Nano)
-├── GAMING.md                   # 🎮 Core-Gaming documentation
+├── GAMING.md                   # 🎮 Core-Gaming and Standard-Gaming documentation
 ├── LTSC.md                     # 🏢 LTSC documentation
 ├── CONTRIBUTING.md             # Contributor guidelines
 ├── CODE_OF_CONDUCT.md          # Community standards
@@ -522,6 +602,27 @@ disable_fso                   disable_game_mode         disable_printing
 ```
 
 See **[GAMING.md](GAMING.md)** for what each group does and what it breaks.
+
+### Standard-Gaming Parameters
+
+The Standard builder takes the same gaming switches as Core, plus two preservation
+switches. They are opt-in, so an existing Standard invocation is unchanged:
+
+```powershell
+.\tiny11maker-headless.ps1
+    -GamingProfile                # Enable the gaming layer on the Standard base
+    [-GamingProfileFile <path>]   # Default: config/gaming_profile.json
+    [-GamingGroups <hashtable>]   # Per-group overrides
+    [-HagsMode <on|off|leave>]    # Default: leave (Core defaults to on)
+    [-PreserveWebView2]           # Keep Edge WebView2; Edge and OneDrive still go
+    [-PreserveXbox]               # Keep Xbox AppX so the profile decides
+```
+
+The **Build and Release Tiny11 Standard-Gaming** workflow always passes
+`-GamingProfileFile config/gaming_profile_compatible.json`, `-PreserveWebView2` and
+`-PreserveXbox` unless you pick the `aggressive` preset. The image keeps WinSxS servicing,
+Bluetooth, Defender and Windows Update throughout; the compatible preset adds only the
+low-risk latency groups.
 
 ### Account Setup (Standard & Core)
 
@@ -966,7 +1067,31 @@ skip_cleanup:           # Same as above
 # WinRE is always preserved. There is no preserve_winre input any more.
 ```
 
-#### 4. Build Tiny11 Core-Gaming 🎮
+#### 4. Build Tiny11 Standard-Gaming 🧩
+**File**: `.github/workflows/build-tiny11-standard-gaming.yml`
+
+Accepts the same core inputs as **Build Tiny11** (`windows_version`, `windows_iso_url`,
+`windows_build`, `image_index`, `language`, `skip_cleanup`, `account_setup`,
+`update_to_latest`) plus three gaming inputs:
+
+```yaml
+gaming_preset:        # type: choice
+  options: [compatible, aggressive]
+  default: compatible # aggressive reuses config/gaming_profile.json
+
+disable_cpu_idle:     # type: boolean, default: false
+hags:                 # type: choice
+  options: [on, off, leave]
+  default: leave      # Standard already ships HwSchMode=2
+```
+
+The workflow always passes `-PreserveWebView2` and `-PreserveXbox`, and verifies
+`scripts/tiny11-standard-gaming-buildinfo.json` so a build that silently skipped the
+gaming layer fails instead of publishing a plain Standard ISO under a gaming name.
+
+Full details: **[GAMING.md → Standard-Gaming variant](GAMING.md#standard-gaming-variant)**
+
+#### 5. Build Tiny11 Core-Gaming 🎮
 **File**: `.github/workflows/build-tiny11-core-gaming.yml`
 
 Accepts **every input from Build Tiny11 Core** (`windows_version`, `windows_iso_url`,
@@ -1000,7 +1125,7 @@ boot-critical service list, so a bad edit cannot produce an unbootable image.
 
 Full details: **[GAMING.md](GAMING.md)**
 
-#### 5. Build Tiny11 LTSC 🏢
+#### 6. Build Tiny11 LTSC 🏢
 **File**: `.github/workflows/build-tiny11-ltsc.yml`
 
 The Standard pipeline on Windows 11 / Windows 10 Enterprise LTSC media.
@@ -1025,7 +1150,7 @@ There is **no `image_index` input**. LTSC media carries three images on Windows 
 and two on Windows 10, and the numbers mean different things per ISO, so the index is
 read from the mounted ISO instead of being typed. See [LTSC.md](LTSC.md).
 
-#### 6. Build Tiny11 Core LTSC 🏢
+#### 7. Build Tiny11 Core LTSC 🏢
 **File**: `.github/workflows/build-tiny11-core-ltsc.yml`
 
 The Core pipeline on the same media. Same inputs as Build Tiny11 LTSC, plus
@@ -1090,6 +1215,7 @@ date, so a folder reads newest-last:
 | Standard | `Tiny11-Pro-26H2` |
 | Core | `Tiny11Core-Pro-26H2` |
 | Core-Gaming | `Tiny11CoreGaming-Pro-26H2` |
+| Standard-Gaming | `Tiny11StandardGaming-Pro-26H2` |
 | Nano | `Nano11-Pro-26H2` |
 | LTSC | `Tiny11-LTSC-<edition>-<year>` |
 | Core LTSC | `Tiny11Core-LTSC-<edition>-<year>` |
@@ -1334,7 +1460,7 @@ Found a security issue? **DO NOT create a public GitHub issue!**
 ### 📚 Available Documentation
 
 - **[README.md](README.md)** - This file (overview & quick start)
-- **[GAMING.md](GAMING.md)** - 🎮 Tiny11 Core-Gaming: every tweak, its risk, and how to revert
+- **[GAMING.md](GAMING.md)** - 🎮 Tiny11 Core-Gaming and Standard-Gaming: every tweak, its risk, and how to revert
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** - Community guidelines
 - **[SECURITY.md](SECURITY.md)** - Security policy & reporting

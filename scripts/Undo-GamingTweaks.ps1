@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Reverts the reversible parts of the Tiny11 Core-Gaming profile.
+    Reverts the reversible parts of the applied Tiny11 gaming profile.
 
 .DESCRIPTION
     Shipped inside the image at C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1.
 
     Reads the "revert" block of the bundled gaming_profile.json and restores the
     settings the builder changed. It is deliberately honest about what it CANNOT undo:
-    removed Defender, removed printing features, removed AppX packages and the BCD
-    mitigation flags are not restorable from inside the running OS.
+    the profile's "irreversible" list is printed at the end, so removed packages,
+    features or security components are never implied to come back.
 
     Run from an elevated PowerShell prompt:
         powershell -ExecutionPolicy Bypass -File C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1
@@ -69,7 +69,7 @@ $liveHivePrefixes = @{
 }
 
 Write-Log "=============================================="
-Write-Log "Tiny11 Core-Gaming revert"
+Write-Log "Tiny11 Gaming revert"
 Write-Log "=============================================="
 
 if (-not (Test-IsElevated)) {
@@ -91,11 +91,14 @@ try {
 }
 
 $revert = $profile.revert
+$revertCount = @($revert.reversible).Count
+$serviceCount = @($revert.serviceRestore).Count
 
 Write-Log ""
-Write-Log "This will re-enable: Game Mode, Fullscreen Optimizations, VBS / Memory Integrity,"
-Write-Log "Spectre/Meltdown mitigations, Fast Startup, mouse acceleration, background apps"
-Write-Log "and Windows Search / Bluetooth services."
+Write-Log "This restores $revertCount registry value(s) and $serviceCount service(s) from"
+Write-Log "the bundled profile, and switches the active power plan back to Balanced unless"
+Write-Log "-KeepPowerPlan is given. Anything the profile removed rather than changed is"
+Write-Log "listed at the end and cannot be restored."
 Write-Log ""
 
 if (-not $Force) {
@@ -210,8 +213,8 @@ foreach ($item in $revert.irreversible) {
 }
 
 Write-Log ""
-Write-Log "Some changes need a reboot: VBS / Memory Integrity, mitigation flags and"
-Write-Log "hypervisorlaunchtype only take effect after a restart."
+Write-Log "Some changes need a reboot: power settings, security features and boot flags"
+Write-Log "only take effect after a restart."
 Write-Log ""
 if ($script:Failures -eq 0) {
     Write-Log "Revert complete with no errors." 'SUCCESS'

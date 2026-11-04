@@ -8,6 +8,11 @@ Rainbow Six Siege on a CPU-bound machine.
 > Guard and the Spectre/Meltdown kernel mitigations, and it removes the Xbox stack.
 > That is a deliberate, measurable performance trade-off, not a free win. It is **not**
 > a safe daily-driver configuration. A revert script ships inside the image.
+>
+> **Looking for a daily driver?** The
+> [Standard-Gaming variant](#standard-gaming-variant) starts from Standard and keeps
+> WebView2, Bluetooth, servicing, the Xbox stack, printing and Defender intact while
+> applying a conservative subset of this profile. It ships as its own workflow and preset.
 
 ---
 
@@ -26,6 +31,7 @@ Rainbow Six Siege on a CPU-bound machine.
 - [Honest expectations](#honest-expectations)
 - [Rainbow Six Siege notes](#rainbow-six-siege-notes)
 - [How it is wired into the builder](#how-it-is-wired-into-the-builder)
+- [Standard-Gaming variant](#standard-gaming-variant)
 
 ---
 
@@ -34,11 +40,13 @@ Rainbow Six Siege on a CPU-bound machine.
 ### GitHub Actions
 
 Run the **Build and Release Tiny11 Core-Gaming** workflow. It is a copy of
-*Build and Release Tiny11 Core* with the same inputs plus a set of gaming toggles —
-so anything you already know about the Core workflow still applies.
+*Build and Release Tiny11 Core* with the same inputs plus a small gaming surface: one
+master toggle (`gaming_tweaks`), plus `disable_cpu_idle` and `hags`. The workflow is at
+GitHub's 25-input cap, so the 14 per-group toggles live in
+`config/gaming_profile.json`, the local group editor and `-GamingGroups` rather than in
+the workflow form.
 
-Each toggle maps to one group in `config/gaming_profile.json`. Turning a toggle off
-skips that group entirely; it does not half-apply.
+Each group is applied whole. Turning it off skips it entirely; it does not half-apply.
 
 ### Locally
 
@@ -881,6 +889,194 @@ can reset the active power scheme and the scheme must be created last.
 
 Everything is best-effort: a missing service or an unavailable DISM feature logs a
 warning and continues. A half-applied gaming profile beats a failed 90-minute build.
+
+---
+
+## Standard-Gaming variant
+
+> **Status: implemented.** It ships as the **Build and Release Tiny11 Standard-Gaming**
+> workflow (`.github/workflows/build-tiny11-standard-gaming.yml`) with
+> `config/gaming_profile_compatible.json` as the default preset. The existing Standard,
+> Core, Core-Gaming, Nano and LTSC builds are unchanged.
+
+### Why
+
+Before Standard-Gaming, Core-Gaming was the only build that got the gaming layer, and it
+starts from Core. Core removes or disables things that everyday software expects:
+
+- the Edge WebView2 runtime, which Elgato Wave Link and many game launchers embed
+- the WinSxS servicing stack, so updates, repair and some MSIX installs cannot work
+- Bluetooth services
+- the Xbox / Gaming Services stack
+- Defender
+
+That is the right trade for a disposable esports box and the wrong trade for a daily
+driver. Standard keeps WinSxS servicing, Bluetooth, Defender and the MSIX dependency
+chain, but it also strips Edge WebView2 and has no gaming layer at all. The concrete
+report behind this variant was Wave Link failing on Core-Gaming with *"App Installer
+failed to install package dependencies"* — the failure mode a WebView2-preserving build
+is meant to avoid.
+
+**Standard-Gaming** is the third option: the Standard base (serviceable, WebView2 and
+Bluetooth intact) plus the same `gaming-profile.ps1` engine, driven by a conservative
+preset.
+
+### Shape of the build
+
+| | Standard | Core-Gaming | Standard-Gaming |
+|---|---|---|---|
+| Base | Standard | Core | Standard |
+| WinSxS servicing | kept | minimized | kept |
+| WebView2 runtime | removed by the Edge cleanup | removed | **kept** (`-PreserveWebView2`) |
+| Bluetooth | kept | disabled | kept (compatible preset) |
+| MSIX / VCLibs dependencies | kept | kept | kept as shipped |
+| Defender | kept | removed | kept |
+| Windows Update | serviceable | paused | serviceable |
+| Gaming tweaks | none | full aggressive set | same engine, compatible preset (aggressive opt-in) |
+| Essentials pass | n/a | always on | **not run** (Standard already debloats) |
+
+### The compatible preset
+
+`config/gaming_profile_compatible.json` uses the same schema and the same group list as
+`config/gaming_profile.json`. It changes only the default group set, drops the two
+power-scheme hibernation values, and trims the revert block to what it actually changes.
+The existing preset is not edited.
+
+| Group | Core-Gaming | Compatible | Why |
+|---|---|---|---|
+| `atlas_power_scheme` | on | on | biggest latency win with no compatibility cost |
+| `disable_cpu_idle` | off | off | already opt-in; caps boost on many CPUs |
+| `disable_security_mitigations` | on | **off** | keeps VBS/HVCI/Credential Guard, and avoids the anti-cheat class of problem |
+| `remove_xbox_gaming_stack` | on | **off** | Game Pass and some Store titles need it |
+| `strip_background_noise` | on | **off** | the group is atomic and bundles Bluetooth; Standard already covers the safe parts |
+| `instant_windows` | on | on | shell-only, no app compatibility impact |
+| `disable_fast_startup` | on | **off** | the group also runs `powercfg -h off` at first boot, which deletes `hiberfil.sys`; leaving it off keeps hibernation available |
+| `network_latency_tweaks` | on | on | Nagle/QoS/DoSvc; reversible |
+| `disable_mpo` | on | on | fixes flicker on some GPUs; revert available |
+| `latency_input_tweaks` | on | on | mouse acceleration and USB power saving |
+| `interrupt_latency` | on | on | first-boot MSI/NIC work; best-effort |
+| `disable_fso` | on | on | true fullscreen exclusive |
+| `disable_game_mode` | on | on | shell behaviour only |
+| `disable_printing` | on | **off** | printing is a normal daily-driver need |
+
+HAGS defaults to `leave` rather than `on`, because forcing it is hardware-specific.
+Standard already sets `HwSchMode=2`, so `leave` keeps Hardware Accelerated GPU Scheduling
+on without re-writing the value. The preset keeps `disable_security_mitigations` off, so
+a Standard-Gaming build stays closer to stock security than Core-Gaming — it is a
+latency build, not a hardened build and not an AtlasOS clone.
+
+### Fast Startup and hibernation
+
+The Standard builder enables Fast Startup (`HiberbootEnabled = 1`). The
+`disable_fast_startup` group sets that value to `0`, and at first boot the payload runs
+`powercfg -h off`, which deletes `hiberfil.sys`. The two halves are coupled in the
+existing engine, so the compatible preset leaves the whole group off.
+
+The base `atlas_power_scheme` group also writes `HibernateEnabled = 0` and
+`HibernateEnabledDefault = 0`. Those two entries are removed from the compatible preset,
+because enabling the power scheme would otherwise disable hibernation without ever
+calling `powercfg`. The scheme still sets "hibernate after" to never, which only stops
+automatic hibernation - the feature remains available.
+
+Disabling only Fast Startup without touching hibernation would need a new split group;
+that is deliberately not part of this change.
+
+### Building it
+
+**GitHub Actions** → run **Build and Release Tiny11 Standard-Gaming**. It takes the same
+core inputs as the Standard workflow, plus three gaming inputs:
+
+| Input | Default | Notes |
+|---|---|---|
+| `gaming_preset` | `compatible` | `aggressive` reuses `config/gaming_profile.json` on the Standard base |
+| `disable_cpu_idle` | `false` | per-build override; same caveat as Core-Gaming |
+| `hags` | `leave` | `on` / `off` force `HwSchMode` |
+
+The workflow always passes `-PreserveWebView2` and `-PreserveXbox`; the preset decides
+whether the Xbox stack is later removed. It verifies
+`scripts/tiny11-standard-gaming-buildinfo.json` after the build and fails the run if the
+gaming layer did not execute.
+
+**Locally:**
+
+```powershell
+# Compatible preset (the workflow default)
+.\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
+    -GamingProfileFile .\config\gaming_profile_compatible.json `
+    -PreserveWebView2 -PreserveXbox
+
+# Aggressive preset on the Standard base
+.\scripts\tiny11maker-headless.ps1 -ISO E -INDEX 6 -GamingProfile `
+    -PreserveWebView2 -PreserveXbox
+```
+
+`-HagsMode` defaults to `leave` on the Standard builder; Core defaults to `on`.
+
+### What changes
+
+Additive only:
+
+1. `scripts/tiny11maker-headless.ps1` — new optional parameters:
+   `-GamingProfile`, `-GamingProfileFile`, `-GamingGroups`, `-HagsMode` (default
+   `leave`), `-PreserveWebView2` and `-PreserveXbox`. All default off, so an existing
+   Standard invocation behaves exactly as it does today. The gaming engine is dot-sourced
+   only when `-GamingProfile` is present, matching Core.
+2. `config/gaming_profile_compatible.json` — the preset above.
+3. `.github/workflows/build-tiny11-standard-gaming.yml` — a copy of the Standard workflow
+   plus the three gaming inputs.
+4. `scripts/gaming-profile.ps1` — `New-GamingFirstBootPayload` takes `-ProfilePath`, so
+   the compatible preset is the profile bundled into the image for the revert script.
+5. `README.md` and this file — the variant table and this implementation note.
+
+No existing workflow file, preset or default is modified. `-PreserveWebView2` guards only
+the WebView2 paths and the WinSxS WebView deletion, not the Edge or OneDrive removals;
+without the switch the cleanup runs exactly as before. `-PreserveXbox` removes
+`Microsoft.Xbox*` and `Microsoft.GamingApp` from Standard's AppX removal list, so the
+profile can decide their fate.
+
+### Implementation notes
+
+The gaming engine is builder-agnostic: `Import-GamingProfile`, `Test-GamingProfile` and
+the apply functions take a profile object and a staging directory. The Standard builder
+uses the same four call sites Core uses:
+
+- image-level package/feature removals, while the hives are unloaded
+- registry tweaks after the Standard performance pass
+- service tweaks after the Standard service pass
+- payload staging before `Dismount-AndExport`
+
+The essentials pass is **not** run. It is unconditional in Core-Gaming and turns
+hibernation off in both the offline registry and first boot. Standard already removes 40+
+apps, disables telemetry and applies its own service and privacy pass, so a second,
+overlapping debloat layer adds risk without much gain. `gaming-firstboot.ps1` logs a
+warning and continues when `essentials_profile.json` is absent.
+
+The revert script is staged at `C:\Windows\Tiny11Gaming\Undo-GamingTweaks.ps1`. The
+compatible preset's `serviceRestore` list is empty, so the script restores the registry
+values it changed (Game Mode, FSO, MPO, mouse acceleration and so on) and switches the
+power plan back to Balanced, without claiming that Bluetooth or Windows Search were
+re-enabled.
+
+### Known limitations
+
+- **No dependency version check.** WebView2 is preserved, but the build does not validate
+  `Microsoft.WindowsAppRuntime.2` or `Microsoft.VCLibs.140.00.UWPDesktop` versions. If a
+  specific app rejects the runtime, install its dependencies after setup.
+- **The aggressive preset is not Core-Gaming.** It applies Core-Gaming's group set to a
+  Standard base; WinSxS servicing and Defender stay available by design. The
+  `strip_background_noise` group still disables Bluetooth services, so use the default
+  compatible preset if Bluetooth matters.
+- **The revert script cannot restore removed packages or features.** An aggressive preset
+  removes the Xbox stack and printing; the compatible preset removes neither.
+
+### Non-goals
+
+- Not replacing Core-Gaming, and not changing any of its defaults
+- Not making Standard-Gaming the default download
+- Not turning Standard into Core: WinSxS, WebView2, Bluetooth, Defender and Windows
+  Update stay serviceable
+- Not promising that every anti-cheat accepts every tweak; the compatible preset leaves
+  VBS/HVCI on specifically to avoid that class of problem
 
 ---
 

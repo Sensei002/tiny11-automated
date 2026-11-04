@@ -38,6 +38,7 @@ BUILD_WORKFLOWS = [
     "build-tiny11.yml",
     "build-tiny11-core.yml",
     "build-tiny11-core-gaming.yml",
+    "build-tiny11-standard-gaming.yml",
     "build-nano11.yml",
     "build-tiny11-ltsc.yml",
     "build-tiny11-core-ltsc.yml",
@@ -315,7 +316,8 @@ def validate_sourceforge_folders() -> None:
     """One folder per variant, and the backfill must not invent a different one.
 
     A release lands in a folder named after the variant, edition and version -
-    Tiny11-Pro-26H2, Tiny11Core-Pro-26H2, Tiny11CoreGaming-Pro-26H2. The backfill
+    Tiny11-Pro-26H2, Tiny11Core-Pro-26H2, Tiny11CoreGaming-Pro-26H2,
+    Tiny11StandardGaming-Pro-26H2. The backfill
     workflow has no way to derive that from an ISO filename, so each build records
     it in the verification file and the backfill reads it back.
     """
@@ -326,6 +328,7 @@ def validate_sourceforge_folders() -> None:
         "build-tiny11.yml": '"Tiny11-$edition-$version"',
         "build-tiny11-core.yml": '"Tiny11Core-$edition-$version"',
         "build-tiny11-core-gaming.yml": '"Tiny11CoreGaming-$edition-$version"',
+        "build-tiny11-standard-gaming.yml": '"Tiny11StandardGaming-$edition-$version"',
         "build-nano11.yml": '"Nano11-$edition-$version"',
     }
 
