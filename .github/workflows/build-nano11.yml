@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       windows_version:
-        description: 'Windows version (e.g., 24H2, 25H2, 26H2)'
+        description: 'ISO release label. Defaults to Latest; when no direct URL is supplied, the resolver detects the current x64 ISO from Microsoft.'
         required: false
-        default: '26H2'
+        default: 'Latest'
       windows_iso_url:
         description: 'Optional. Leave EMPTY to auto-resolve a fresh, signed Windows 11 ISO link from Microsoft at run time - the consumer download page has no static link, so any URL pasted here expires in ~24h. Provide a direct link only to override, e.g. to pin an older 24H2/25H2 build the consumer page no longer serves.'
         required: false
@@ -39,6 +39,14 @@ on:
         required: false
         default: false
         type: boolean
+      account_setup:
+        description: 'Local account setup. "classic" (default) lets you create your own local account during OOBE; "auto-admin" creates Admin and signs in automatically.'
+        type: choice
+        required: false
+        default: 'classic'
+        options:
+          - 'classic'
+          - 'auto-admin'
       update_to_latest:
         description: 'Install the newest cumulative update Microsoft has published for this build before debloating, so the image is not stuck at the ISO build. "required" fails the build if the update cannot be applied, "best-effort" publishes the image at the ISO build instead, and "off" skips the update entirely. Adds a ~5 GB download and 20-40 minutes.'
         type: choice
@@ -201,14 +209,7 @@ jobs:
             } else {
               $msLanguage = $language
             }
-
-            # The consumer download page only serves the current release. 3813 is the
-            # x64 multi-edition ISO Fido lists for it (currently 26H2). Any other or
-            # older version label still resolves the current ISO; paste a URL to pin
-            # a specific older build.
-            $productEditionIds = @{ '26H2' = 3813 }
-            $productEditionId  = 3813
-            if ($productEditionIds.ContainsKey($version)) { $productEditionId = $productEditionIds[$version] }
+            # The resolver detects the current x64 multi-edition ISO from Microsoft's live page.
 
             Write-Output "No URL supplied - resolving the current Windows 11 consumer ISO from Microsoft..."
             Write-Output "  version label : $version"
@@ -216,7 +217,7 @@ jobs:
             Write-Output "  productEdition: $productEditionId"
 
             try {
-              $iso = & .\scripts\resolve-windows-iso.ps1 -Language $msLanguage -ProductEditionId $productEditionId
+              $iso = & .\scripts\resolve-windows-iso.ps1 -Language $msLanguage
             } catch {
               Write-Error "Failed to resolve the Windows 11 ISO URL: $($_.Exception.Message)"
               exit 1
@@ -367,6 +368,11 @@ jobs:
             ISO = $env:ISO_DRIVE
             INDEX = [int]"${{ github.event.inputs.image_index }}"
           }
+
+          $accountSetup = "${{ github.event.inputs.account_setup }}"
+          if ([string]::IsNullOrWhiteSpace($accountSetup)) { $accountSetup = 'classic' }
+          $params.AccountSetup = $accountSetup
+          Write-Output "Account setup: $accountSetup"
 
           if ("${{ github.event.inputs.skip_cleanup }}" -eq "true") {
             $params.SkipCleanup = $true
