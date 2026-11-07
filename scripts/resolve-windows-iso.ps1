@@ -30,8 +30,8 @@
     Run with -ListLanguages to print every accepted value.
 
 .PARAMETER ProductEditionId
-    3813 = Windows 11 26H2 (build 26300.9457) multi-edition ISO, x64.
-    (3816 is the same release for ARM64; 3814/3815 are the China SKUs.)
+    Optional override. By default, the current x64 multi-edition ISO product ID is
+    discovered from Microsoft's official Windows 11 download page on every run.
 
 .PARAMETER ListLanguages
     Print the languages Microsoft currently offers for this edition, then exit.
@@ -47,7 +47,7 @@
 param(
     [string]$Language,
 
-    [int]$ProductEditionId = 3813,
+    [int]$ProductEditionId = 0,
 
     [switch]$ListLanguages
 )
@@ -92,6 +92,29 @@ function Invoke-CurlText {
 function Invoke-CurlQuiet {
     param([string]$Url)
     Invoke-CurlText -Url $Url | Out-Null
+}
+
+# Resolve the current x64 multi-edition ISO from Microsoft's live download page.
+# This avoids pinning an edition ID that changes when Microsoft replaces a release.
+if ($ProductEditionId -le 0) {
+    $downloadPage = Invoke-CurlText -Url $Referer -Referer 'https://www.microsoft.com/'
+    $options = [regex]::Matches(
+        $downloadPage,
+        '(?is)<option\b[^>]*value=["''](?<id>\d+)["''][^>]*>(?<label>.*?)</option>'
+    )
+    $latestOption = $null
+    foreach ($option in $options) {
+        $label = [System.Net.WebUtility]::HtmlDecode(($option.Groups['label'].Value -replace '<[^>]+>', '')).Trim()
+        if ($label -match '(?i)Windows\s*11.*(x64|64-bit|multi-edition)') {
+            $latestOption = $option
+            break
+        }
+    }
+    if (-not $latestOption) {
+        throw "Could not identify the current Windows 11 x64 multi-edition ISO on Microsoft's download page. Microsoft may have changed its page markup."
+    }
+    $ProductEditionId = [int]$latestOption.Groups['id'].Value
+    Write-Host "Detected current Microsoft Windows 11 x64 ISO productEditionId: $ProductEditionId"
 }
 
 $session = [guid]::NewGuid().ToString()
