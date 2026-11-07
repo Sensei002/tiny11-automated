@@ -92,7 +92,7 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Fail the build when the image cannot be brought up to the latest build, instead of continuing at the base build. Only meaningful together with -UpdateToLatest.")]
     [switch]$RequireLatestUpdate,
 
-    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' (default) runs OOBE; 'auto-admin' pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' (default) runs OOBE so the person installing creates their own local account; 'auto-admin' pre-creates a local 'Admin' account and skips OOBE.")]
     [ValidateSet('auto-admin', 'classic')]
     [string]$AccountSetup = 'classic',
 
