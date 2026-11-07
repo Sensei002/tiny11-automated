@@ -69,7 +69,7 @@ Everything the Standard or Core variant already does, on an LTSC base:
 - Xbox / Game Bar, Teams, Copilot, Chat removed
 - Telemetry and diagnostics disabled
 - TPM / Secure Boot / CPU / RAM checks bypassed
-- Offline local account, OOBE skipped (`auto-admin`) or your own name (`classic`)
+- Offline local account: classic OOBE (default, create your own account) or optional `auto-admin`
 
 LTSC already ships without the Store, Copilot and the consumer app set, so the
 removal list is shorter than on a consumer ISO. That is the point of starting here.
