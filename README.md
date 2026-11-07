@@ -55,11 +55,9 @@ Real screenshots from a Tiny11 build — a near-empty, fast, bloat-free Windows 
 
 ## 📊 Project Stats
 
-- **📦 Total Downloads**: 261436 (and growing!)
-- **🌍 Active Users**: 261436 worldwide
-- **✅ Build Success Rate**: 100%
-- **⏱️ Average Build Time**: ~30-50 minutes
-- **💾 ISO Size Reduction**: Up to 50% smaller (Windows 11 26H2)
+- **Current Windows release:** detected live from Microsoft's official download page.
+- **Build status:** see the live GitHub Actions badges at the top of this README.
+- **Downloads and repository activity:** see the live counters in [Community Stats](#community-stats).
 
 ## 🆕 What's New (January 2026)
 
@@ -518,7 +516,7 @@ tiny11-automated/
     [-UpdateToLatest]          # 🔄 Install the newest cumulative update before debloating
     [-SCRATCH <string>]        # Optional: Scratch disk (default: script directory)
     [-SkipCleanup]             # Optional: Keep temp files for debugging
-    [-AccountSetup <string>]   # Optional: "auto-admin" (default) | "classic"
+    [-AccountSetup <string>]   # Optional: "classic" (default) | "auto-admin"
 ```
 
 `-ExpectedEdition` turns `-INDEX` into a hint: the image is located by name on the ISO
@@ -624,15 +622,15 @@ The **Build and Release Tiny11 Standard-Gaming** workflow always passes
 Bluetooth, Defender and Windows Update throughout; the compatible preset adds only the
 low-risk latency groups.
 
-### Account Setup (Standard & Core)
+### Account Setup (Standard, Core & Nano)
 
 `-AccountSetup` controls how the local account is created on first boot, and
-applies to both `tiny11maker-headless.ps1` and `tiny11coremaker-headless.ps1`:
+applies to Standard, Core and Nano builders:
 
 | Value | Behaviour |
 |-------|-----------|
-| `auto-admin` *(default)* | Pre-creates a local administrator called `Admin` with a blank password, auto-logon on first boot, OOBE skipped entirely. |
-| `classic` | OOBE runs offline so **you** create your own local account with your own name. Still no Microsoft account and no network required. |
+| `classic` *(default)* | OOBE runs offline so you create your own local account. No Microsoft account or network is required. |
+| `auto-admin` | Pre-creates a local administrator called `Admin` with a blank password, auto-logon on first boot, OOBE skipped entirely. |
 
 Either way the install stays fully offline: `DynamicUpdate` is disabled and
 `BypassNRO` / `DisableOnline` are set, so Setup never reaches a Microsoft
@@ -952,12 +950,9 @@ account**. There is nothing to type at `Shift+F10` and no `BYPASSNRO` dance.
 Two account modes are available — pick one with the `account_setup` workflow
 input, or `-AccountSetup` on the builders:
 
-- **`auto-admin`** *(default)* — the account described below is created for you
-  and OOBE is skipped entirely.
-- **`classic`** — OOBE runs offline and **you** create the local account with
-  your own name. Still no Microsoft account and no network required.
-
-The table below describes the default `auto-admin` mode:
+- **`classic`** *(default)* — OOBE runs offline and you create your own local account.
+- **`auto-admin`** — the account described below is created for you and OOBE is skipped entirely.
+The table below describes the optional `auto-admin` mode:
 
 | Setting | Value |
 |---------|-------|
@@ -1016,10 +1011,10 @@ skip_cleanup:           # Debug mode (keep artifacts)
 
 account_setup:          # 🆕 Local account setup
   type: choice
-  options: [auto-admin, classic]
+  options: [classic, auto-admin]
   # auto-admin = automatically create the local account "Admin" (OOBE skipped)
   # classic    = you create your own local account with your name during setup
-  default: auto-admin
+  default: classic
 ```
 
 #### 2. Build Tiny11 Core (Ultra-Minimal)
@@ -1044,10 +1039,10 @@ remove_defender:        # 🆕 Completely remove Windows Defender / Security
 
 account_setup:          # 🆕 Local account setup
   type: choice
-  options: [auto-admin, classic]
+  options: [classic, auto-admin]
   # auto-admin = automatically create the local account "Admin" (OOBE skipped)
   # classic    = you create your own local account with your name during setup
-  default: auto-admin
+  default: classic
 ```
 
 #### 3. Build Nano11 (EXTREME Minimal)
@@ -1143,7 +1138,7 @@ windows_iso_url:        # Paste a direct LTSC ISO link - required, no default
 windows_build:          # Optional fallback build number
 language:               # File-name language (default: English)
 skip_cleanup:           # Debug mode
-account_setup:          # auto-admin (default) | classic
+account_setup:          # classic (default) | auto-admin
 ```
 
 There is **no `image_index` input**. LTSC media carries three images on Windows 11
@@ -1487,7 +1482,7 @@ Found a security issue? **DO NOT create a public GitHub issue!**
 
 ## 🤝 Contributing
 
-We welcome contributions from the community! Tiny11 Automated serves **2,000+ users** worldwide.
+We welcome contributions from the community! Tiny11 Automated welcomes users and contributors worldwide.
 
 ### Ways to Contribute
 
@@ -1551,11 +1546,11 @@ All contributors are recognized in:
 
 ### Community Stats
 
-- 👥 **Active Users**: 3,000+
-- 📥 **Total Downloads**: 19,000+
-- 📈 **Weekly Downloads**: 3,000 (growing!)
-- ⭐ **GitHub Stars**: 11
-- 🍴 **Forks**: 8
+- 📥 **SourceForge downloads:** [![Downloads](https://img.shields.io/sourceforge/dt/tiny11-automated.svg)](https://sourceforge.net/projects/tiny11-automated/files/latest/download)
+- ⭐ **GitHub stars:** [![Stars](https://img.shields.io/github/stars/Sensei002/tiny11-automated?style=social)](https://github.com/Sensei002/tiny11-automated/stargazers)
+- 🍴 **GitHub forks:** [![Forks](https://img.shields.io/github/forks/Sensei002/tiny11-automated?style=social)](https://github.com/Sensei002/tiny11-automated/network/members)
+
+Active-user, weekly-download and build-success figures are not published because the repository does not have a reliable public source for those metrics.
 
 ### Get Help
 
@@ -1652,7 +1647,7 @@ The authors (Sensei002, ntdevlabs) are **NOT responsible** for:
 - **ntdevlabs** - Creator of original tiny11builder
 - **Microsoft** - Windows 11 operating system
 - **Community contributors** - Bug reports, feature requests, and PRs
-- **2,000+ users worldwide** - Your feedback drives improvement
+- **The Tiny11 Automated community** - Your feedback drives improvement
 
 ### Support the Project
 
