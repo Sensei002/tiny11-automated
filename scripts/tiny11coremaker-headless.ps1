@@ -164,7 +164,7 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Completely remove Windows Defender / Security so no antimalware service is present in the finished image. Off by default - the standard Core build only disables the Defender services. A Core-Gaming build always does this, so the switch is redundant there.")]
     [switch]$RemoveDefender,
 
-    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' (default) runs OOBE so the person installing creates their own local account; 'auto-admin' pre-creates a local 'Admin' account and skips OOBE.")]
     [ValidateSet('auto-admin', 'classic')]
     [string]$AccountSetup = 'classic',
 
