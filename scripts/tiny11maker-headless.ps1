@@ -20,7 +20,7 @@
     Skip cleanup of temporary files after ISO creation (optional, for debugging)
 
 .PARAMETER AccountSetup
-    How the local account is set up on first boot (optional, default 'auto-admin'):
+    How the local account is set up on first boot (optional, default 'classic'):
       auto-admin - pre-create a local administrator called 'Admin', blank password,
                    auto-logon on first boot, OOBE skipped entirely.
       classic    - let OOBE run offline so the person installing creates their own
@@ -92,9 +92,9 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Fail the build when the image cannot be brought up to the latest build, instead of continuing at the base build. Only meaningful together with -UpdateToLatest.")]
     [switch]$RequireLatestUpdate,
 
-    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' (default) runs OOBE; 'auto-admin' pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
-    [string]$AccountSetup = 'auto-admin',
+    [string]$AccountSetup = 'classic',
 
     [Parameter(Mandatory=$false, HelpMessage="Apply a Tiny11 gaming profile on top of the Standard image. The Standard base stays serviceable; the profile is data-driven from config/gaming_profile.json (or -GamingProfileFile). Off by default.")]
     [switch]$GamingProfile,
@@ -173,7 +173,7 @@ function Write-IsoAnswerFile {
         [Parameter(Mandatory=$false)][string]$Template,
         [Parameter(Mandatory=$false)]
         [ValidateSet('auto-admin', 'classic')]
-        [string]$AccountMode = 'auto-admin'
+        [string]$AccountMode = 'classic'
     )
 
     if (-not $Template) {
