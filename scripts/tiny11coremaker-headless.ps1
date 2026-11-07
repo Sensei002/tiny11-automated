@@ -35,7 +35,7 @@
     this switch is redundant there; it stays meaningful for a plain Core build.
 
 .PARAMETER AccountSetup
-    How the local account is set up on first boot (optional, default 'auto-admin'):
+    How the local account is set up on first boot (optional, default 'classic'):
       auto-admin - pre-create a local administrator called 'Admin', blank password,
                    auto-logon on first boot, OOBE skipped entirely.
       classic    - let OOBE run offline so the person installing creates their own
@@ -164,9 +164,9 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Completely remove Windows Defender / Security so no antimalware service is present in the finished image. Off by default - the standard Core build only disables the Defender services. A Core-Gaming build always does this, so the switch is redundant there.")]
     [switch]$RemoveDefender,
 
-    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'auto-admin' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' (default) pre-creates a local 'Admin' account and skips OOBE. 'classic' runs OOBE so the person installing creates their own local account with their own name.")]
     [ValidateSet('auto-admin', 'classic')]
-    [string]$AccountSetup = 'auto-admin',
+    [string]$AccountSetup = 'classic',
 
     [Parameter(Mandatory=$false, HelpMessage="Apply the Tiny11 Core-Gaming profile: AtlasOS-style power scheme, latency-first tweaks, security mitigations off. Layers on top of the Core performance profile. Also always removes Windows Defender / Security. Windows Update is controlled by -WindowsUpdateMode. See GAMING.md.")]
     [switch]$GamingProfile,
@@ -261,7 +261,7 @@ function Write-IsoAnswerFile {
         [Parameter(Mandatory=$false)][string]$Template,
         [Parameter(Mandatory=$false)]
         [ValidateSet('auto-admin', 'classic')]
-        [string]$AccountMode = 'auto-admin'
+        [string]$AccountMode = 'classic'
     )
 
     if (-not $Template) {
