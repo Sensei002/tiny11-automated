@@ -31,7 +31,8 @@
 
 .PARAMETER ProductEditionId
     Optional override. By default, the current x64 multi-edition ISO product ID is
-    discovered from Microsoft's official Windows 11 download page on every run.
+    read from the latest Windows 11 release metadata maintained by Fido (Rufus),
+    then used with Microsoft's official download API.
 
 .PARAMETER ListLanguages
     Print the languages Microsoft currently offers for this edition, then exit.
@@ -94,27 +95,35 @@ function Invoke-CurlQuiet {
     Invoke-CurlText -Url $Url | Out-Null
 }
 
-# Resolve the current x64 multi-edition ISO from Microsoft's live download page.
-# This avoids pinning an edition ID that changes when Microsoft replaces a release.
+# Microsoft's consumer download page does not publish the edition ID in its
+# rendered HTML. Fido (the PowerShell downloader maintained by Rufus' author)
+# tracks Microsoft's current Windows release metadata. Read its first Windows 11
+# release and take the first Home/Pro/Edu ID, which Fido documents as x64 (the
+# second ID in the pair is ARM64). This follows future releases without pinning
+# a productEditionId in this repository.
 if ($ProductEditionId -le 0) {
-    $downloadPage = Invoke-CurlText -Url $Referer -Referer 'https://www.microsoft.com/'
-    $options = [regex]::Matches(
-        $downloadPage,
-        '(?is)<option\b[^>]*value=["''](?<id>\d+)["''][^>]*>(?<label>.*?)</option>'
+    $fidoUrl = 'https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1'
+    $fidoSource = Invoke-CurlText -Url $fidoUrl
+
+    if ([string]::IsNullOrWhiteSpace($fidoSource) -or
+        $fidoSource -notmatch '\$WindowsVersions\s*=') {
+        throw "Could not retrieve the current Windows release metadata from Fido ($fidoUrl). Check GitHub connectivity and try again."
+    }
+
+    # Match the first Windows 11 release in Fido's ordered release list, then
+    # the first Home/Pro/Edu product ID in that release. Fido lists x64 first.
+    $latestEdition = [regex]::Match(
+        $fidoSource,
+        '(?is)\$WindowsVersions\s*=\s*@\(\s*@\(\s*@\("Windows 11"\s*,\s*"windows11"\s*\)\s*,\s*@\(\s*"(?<release>[^"]+)"(?<releaseBlock>.*?)@\("Windows 11 Home/Pro/Edu"\s*,\s*(?:@\(\s*)?(?<id>\d+)'
     )
-    $latestOption = $null
-    foreach ($option in $options) {
-        $label = [System.Net.WebUtility]::HtmlDecode(($option.Groups['label'].Value -replace '<[^>]+>', '')).Trim()
-        if ($label -match '(?i)Windows\s*11.*(x64|64-bit|multi-edition)') {
-            $latestOption = $option
-            break
-        }
+
+    if (-not $latestEdition.Success) {
+        throw "Could not parse the latest Windows 11 x64 productEditionId from Fido metadata. The upstream release format may have changed."
     }
-    if (-not $latestOption) {
-        throw "Could not identify the current Windows 11 x64 multi-edition ISO on Microsoft's download page. Microsoft may have changed its page markup."
-    }
-    $ProductEditionId = [int]$latestOption.Groups['id'].Value
-    Write-Host "Detected current Microsoft Windows 11 x64 ISO productEditionId: $ProductEditionId"
+
+    $ProductEditionId = [int]$latestEdition.Groups['id'].Value
+    $releaseName = $latestEdition.Groups['release'].Value
+    Write-Host "Detected latest Windows 11 release from Fido metadata: $releaseName (x64 productEditionId: $ProductEditionId)"
 }
 
 $session = [guid]::NewGuid().ToString()
