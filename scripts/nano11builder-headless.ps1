@@ -51,6 +51,10 @@ param (
     [Parameter(Mandatory=$false, HelpMessage="Skip cleanup of temporary files")]
     [switch]$SkipCleanup,
 
+    [Parameter(Mandatory=$false, HelpMessage="Local account setup. 'classic' runs OOBE so you create your own local account; 'auto-admin' creates the Admin account and signs in automatically.")]
+    [ValidateSet('classic', 'auto-admin')]
+    [string]$AccountSetup = 'classic',
+
     [Parameter(Mandatory=$false, HelpMessage="Bring the mounted image up to the newest cumulative update Microsoft has published for its build, before any removal runs. Requires network access; a failed lookup or apply logs a warning and the build continues at its base build.")]
     [switch]$UpdateToLatest,
 
@@ -110,7 +114,10 @@ function Write-IsoAnswerFile {
     # local-account automation silently stops working.
     param(
         [Parameter(Mandatory=$true)][string]$Destination,
-        [Parameter(Mandatory=$false)][string]$Template
+        [Parameter(Mandatory=$false)][string]$Template,
+        [Parameter(Mandatory=$false)]
+        [ValidateSet('classic', 'auto-admin')]
+        [string]$AccountMode = 'classic'
     )
 
     if (-not $Template) {
@@ -133,6 +140,14 @@ function Write-IsoAnswerFile {
             '(<Key>/IMAGE/INDEX</Key>\s*<Value>)\d+(</Value>)',
             ('${1}' + $INDEX + '${2}')
         )
+
+        # Classic mode removes only the pre-created account and automatic logon.
+        # Keep FirstLogonCommands: Nano's first-logon script still performs setup
+        # tasks for the user-created account.
+        if ($AccountMode -eq 'classic') {
+            $content = [regex]::Replace($content, '(?s)\s*<UserAccounts>.*?</UserAccounts>', '')
+            $content = [regex]::Replace($content, '(?s)\s*<AutoLogon>.*?</AutoLogon>', '')
+        }
 
         # Throws if the template is not well-formed XML - we want that to be loud.
         $null = [xml]$content
@@ -939,7 +954,7 @@ function Apply-RegistryTweaks {
 
     # Bake the answer file into the image too, so a later sysprep /generalize keeps
     # the same OOBE behaviour.
-    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$scratchDir\Windows\System32\Sysprep\autounattend.xml" -AccountMode $AccountSetup
 
     # Disable reserved storage
     Set-RegistryValue 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' 'ShippedWithReserves' 'REG_DWORD' '0'
@@ -1332,7 +1347,7 @@ function Create-NanoISO {
 
     # The answer file at the ISO root is the one Windows Setup auto-detects when
     # booting the media. Write-IsoAnswerFile also pins the edition index into it.
-    Write-IsoAnswerFile -Destination "$nano11Dir\autounattend.xml"
+    Write-IsoAnswerFile -Destination "$nano11Dir\autounattend.xml" -AccountMode $AccountSetup
 
     # Guard: an ISO with no usable install image produces exactly the symptom
     # "A media driver your computer needs is missing" when Setup looks for its media,
