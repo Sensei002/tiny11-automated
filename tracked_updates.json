@@ -1,20 +1,20 @@
 {
   "26100": {
-    "month": "2026-10",
-    "title": "2026-10 Cumulative Update for Windows 11, version 24H2 for x64-based Systems (KB5134133) (26100.9725)",
-    "kb": "KB5134133",
-    "build": "26100.9725"
+    "title": "2026-11 Cumulative Update for Windows 11, version 24H2 for x64-based Systems (KB5132061) (26100.9974)",
+    "kb": "KB5132061",
+    "month": "2026-11",
+    "build": "26100.9974"
   },
   "26200": {
-    "month": "2026-10",
-    "title": "2026-10 Cumulative Update for Windows 11, version 25H2 for x64-based Systems (KB5134133) (26200.9725)",
-    "kb": "KB5134133",
-    "build": "26200.9725"
+    "title": "2026-11 Cumulative Update for Windows 11, version 25H2 for x64-based Systems (KB5132061) (26200.9974)",
+    "kb": "KB5132061",
+    "month": "2026-11",
+    "build": "26200.9974"
   },
   "26300": {
-    "month": "2026-10",
-    "title": "2026-10 Cumulative Update for Windows 11, version 26H2 for x64-based Systems (KB5134133) (26300.9725)",
-    "kb": "KB5134133",
-    "build": "26300.9725"
+    "title": "2026-11 Cumulative Update for Windows 11, version 26H2 for x64-based Systems (KB5132061) (26300.9974)",
+    "kb": "KB5132061",
+    "month": "2026-11",
+    "build": "26300.9974"
   }
 }
